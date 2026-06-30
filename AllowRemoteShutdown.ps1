@@ -26,10 +26,10 @@ $config = @{
     Host         = "http://+:{0}/"
     TrayText     = "AllowRemoteShutdown"
     IconIndex    = 27
-    Token        = ""
+    Token        = "" #アクセストークンを任意に設定する
     ShowConsole  = $false
-    ShutdownCmd  = "C:\Utility\PSTools\psshutdown.exe"
-    AbortCmd     = "C:\Utility\PSTools\psshutdown.exe"
+    ShutdownCmd  = "C:\PSTools\psshutdown.exe"#PSShutdown.exeのパス
+    AbortCmd     = "C:\PSTools\psshutdown.exe"#PSShutdown.exeのパス
     AbortArgs    = "-a"
     LogFile      = "$scriptDir\AllowRemoteShutdown.log"
 }
