@@ -2,7 +2,6 @@
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Web
-
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -27,7 +26,7 @@ $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyI
 
 # PSShutdown.exe の共通パス（必要に応じて編集してください）
 # Shared path to PSShutdown.exe (edit if needed)
-$psShutdownPath = "C:\PSTools\psshutdown.exe"
+$psShutdownPath = "C:\Utility\PSTools\psshutdown.exe"
 
 $config = @{
     Port         = 8080
@@ -63,8 +62,8 @@ $config = @{
 
 # トレイメニューの選択状態（一時的、再起動でデフォルトに戻る）
 # Tray menu selection state (temporary, reverts to default on restart)
-$script:mode  = "-s"
-$script:delay = "15"
+$global:currentMode  = "-s"
+$global:currentDelay = "15"
 # ============================================================
 
 # --- ロケール判定と言語選択 ---
@@ -90,7 +89,7 @@ $strings = @{
         MenuMode = "クイックオフのモード"
         Mode_Shutdown = "シャットダウン"
         Mode_Restart  = "再起動"
-        Mode_Logoff   = "ログオフ"
+        Mode_Suspend   = "サスペンド"
         Mode_Hibernate= "休止"
         MenuDelay = "クイックオフの遅延"
         Delay_15 = "15秒"
@@ -99,7 +98,7 @@ $strings = @{
         Delay_Custom = "任意秒数"
         MenuShowLog = "ログを表示／非表示"
         MenuExit = "終了"
-        QuickButton = "クイックオフ（現在：{0}／{1}秒）"
+        QuickButton = "クイックオフ（現在: {0} / {1}秒）"
         ExecuteButton = "実行"
         AbortButton = "シャットダウン中止"
         AbortDoneMsg = "中止しました"
@@ -121,7 +120,7 @@ $strings = @{
         MenuMode = "Quick-off Mode"
         Mode_Shutdown = "Shutdown"
         Mode_Restart  = "Restart"
-        Mode_Logoff   = "Log off"
+        Mode_Suspend   = "Suspend"
         Mode_Hibernate= "Hibernate"
         MenuDelay = "Quick-off Delay"
         Delay_15 = "15s"
@@ -181,23 +180,21 @@ function Write-Log {
     }
 }
 
-# --- 安全な外部プロセス起動関数 ---
-# Safe external process invocation function
+### --- 安全な外部プロセス起動関数 ---
 function Safe-StartProcess {
-    param([string]$file, [string[]]$args)
+    param(
+        [string]$file,
+        [string[]]$argList  # $args から名前を変更して自動変数との競合を回避
+    )
     try {
-        if ($args) {
-            Start-Process $file -ArgumentList $args -WindowStyle Hidden -ErrorAction Stop
+        if (Test-Path $file) {
+            # 引数リストをそのまま渡す
+            Start-Process $file -ArgumentList $argList -WindowStyle Hidden -ErrorAction Stop
         } else {
-            Start-Process $file -WindowStyle Hidden -ErrorAction Stop
+            Write-Log "Error: File not found -> $file"
         }
     } catch {
-        Write-Log "Start-Process failed: $file $args -> $_"
-        try {
-            $icon.BalloonTipTitle = T 'TrayText'
-            $icon.BalloonTipText  = "Error: $file"
-            $icon.ShowBalloonTip(3000)
-        } catch { }
+        Write-Log "Start-Process failed: $file $argList -> $_"
     }
 }
 
@@ -243,65 +240,63 @@ function Update-MenuCheck {
     }
 }
 
-# --- モードコードからモード名を取得する関数 ---
-# Get mode name from mode code function
-function Get-ModeLabel {
-    param([string]$modeCode)
-    switch ($modeCode) {
-        "-s" { return (T 'Mode_Shutdown') }
-        "-r" { return (T 'Mode_Restart') }
-        "-o" { return (T 'Mode_Logoff') }
-        "-h" { return (T 'Mode_Hibernate') }
-        default { return (T 'Mode_Shutdown') }
-    }
-}
-
 # --- シャットダウン処理を実行する関数 ---
-# Invoke shutdown action function
 function Invoke-ShutdownAction {
     param($mode, $delaySeconds, $remoteEndPoint)
-    $args = "$mode -f -t $delaySeconds -v 10 -c"
-    Write-Log (T 'Log_Invoke' $mode $delaySeconds $remoteEndPoint)
+    
+    # 1. 実行用の引数配列を構築
+    $argsArray = @($mode, "-f", "-t", "$delaySeconds", "-v", "10", "-c")
+    
+    # 2. ログ表示用のフルコマンドライン文字列を作成 (スペースで結合)
+    $fullCmdLine = "$($config.ShutdownCmd) $($argsArray -join ' ')"
+    
+    # リモートエンドポイントが空の場合のケア
+    $ep = if ($remoteEndPoint) { $remoteEndPoint } else { "Unknown" }
 
+    # 3. ログ出力
+    # 既存のサマリーログ
+    Write-Log (T 'Log_Invoke' $mode $delaySeconds $ep)
+    # 【追加】PSShutdownに渡す実際のコマンドラインを表示
+    Write-Log "Calling Process: $fullCmdLine"
+
+    # --- 中止ハンドラの設定（バルーン通知用） ---
     if ($script:cancelHandler) {
         try { $icon.remove_BalloonTipClicked($script:cancelHandler) } catch { }
     }
     $script:cancelHandler = {
-        Safe-StartProcess $config.AbortCmd @($config.AbortArgs)
+        Safe-StartProcess $config.AbortCmd @("-a")
         Write-Log (T 'Log_AbortByUser')
-        try {
-            $icon.BalloonTipTitle = T 'TrayText'
-            $icon.BalloonTipText  = T 'AbortedBalloon'
-            $icon.ShowBalloonTip(3000)
-        } catch { }
+        $icon.ShowBalloonTip(3000, (T 'TrayText'), (T 'AbortedBalloon'), 1)
     }
     $icon.add_BalloonTipClicked($script:cancelHandler)
 
+    # --- 実行通知の表示 ---
     try {
-        $icon.BalloonTipTitle = T 'TrayText'
-        $icon.BalloonTipText  = T 'RunningBalloon' $delaySeconds
-        $icon.ShowBalloonTip([int]$delaySeconds * 1000)
+        $msg = T 'RunningBalloon' $delaySeconds
+        $icon.ShowBalloonTip(([int]$delaySeconds * 1000), (T 'TrayText'), $msg, 1)
     } catch { }
 
-    Safe-StartProcess $config.ShutdownCmd @($args)
+    # 4. 実行
+    Safe-StartProcess $config.ShutdownCmd $argsArray
 }
+
 
 # --- HTMLページ生成関数 ---
 # Generate HTML page function
 function Get-HtmlPage {
-    param($token, $message = "")
+    param($token, $message = "", $currentMode = "-s", $currentDelay = "15")
+    Write-Log "DEBUG mode=$global:currentMode delay=$global:currentDelay" # DEBUG用追加
     $tokenQuery = if ($token -ne "") { "?token=$token" } else { "" }
     $msgHtml = if ($message -ne "") { "<p class='msg'>$([System.Web.HttpUtility]::HtmlEncode($message))</p>" } else { "" }
     $langAttr = $script:lang
 
     # ここスコープ前に全ての T() 呼び出しを評価
-    $modeLabel = Get-ModeLabel $script:mode
-    $quickLabel = [System.Web.HttpUtility]::HtmlEncode((T 'QuickButton' $modeLabel $script:delay))
+    $quickLabel = [System.Web.HttpUtility]::HtmlEncode((T 'QuickButton' $currentMode $currentDelay))
     $execLabel = [System.Web.HttpUtility]::HtmlEncode((T 'ExecuteButton'))
     $abortLabel = [System.Web.HttpUtility]::HtmlEncode((T 'AbortButton'))
     $modeOption_Shutdown = [System.Web.HttpUtility]::HtmlEncode((T 'Mode_Shutdown'))
     $modeOption_Restart  = [System.Web.HttpUtility]::HtmlEncode((T 'Mode_Restart'))
-    $modeOption_Logoff   = [System.Web.HttpUtility]::HtmlEncode((T 'Mode_Logoff'))
+    $modeOption_Suspend   = [System.Web.HttpUtility]::HtmlEncode((T 'Mode_Suspend'))
     $modeOption_Hibernate= [System.Web.HttpUtility]::HtmlEncode((T 'Mode_Hibernate'))
     $delayOption_15 = [System.Web.HttpUtility]::HtmlEncode((T 'Delay_15'))
     $delayOption_30 = [System.Web.HttpUtility]::HtmlEncode((T 'Delay_30'))
@@ -328,7 +323,7 @@ function Get-HtmlPage {
   .quick     { background:#2d7; color:#000; }
   .shutdown  { background:#d44; color:#fff; }
   .restart   { background:#48a; color:#fff; }
-  .logoff    { background:#888; color:#fff; }
+  .Suspend    { background:#888; color:#fff; }
   .sleep     { background:#a6a; color:#fff; }
   .abort     { background:#444; color:#fff; border:1px solid #777; }
   select, input[type=number] { padding:8px; font-size:1em; margin:4px; border-radius:6px; border:none; }
@@ -349,7 +344,7 @@ $msgHtml
     <select name="mode">
       <option value="-s">$modeOption_Shutdown</option>
       <option value="-r">$modeOption_Restart</option>
-      <option value="-o">$modeOption_Logoff</option>
+      <option value="-d">$modeOption_Suspend</option>
       <option value="-h">$modeOption_Hibernate</option>
     </select>
     <select name="delay">
@@ -369,13 +364,25 @@ $msgHtml
 </form>
 
 <script>
-document.querySelector('select[name=delay]').addEventListener('change', function(){
-  document.getElementById('customDelay').style.display = (this.value === 'custom') ? 'inline-block' : 'none';
+var delaySelect = document.querySelector('select[name=delay]');
+var customInput = document.getElementById('customDelay');
+
+delaySelect.addEventListener('change', function(){
+  customInput.style.display = (this.value === 'custom') ? 'inline-block' : 'none';
 });
+
 document.querySelector('form[action="/exec"]').addEventListener('submit', function(e){
-  var delaySel = this.delay.value;
-  if (delaySel === 'custom') {
-    this.delay.value = this.customDelay.value || '15';
+  if (delaySelect.value === 'custom') {
+    var val = parseInt(customInput.value, 10);
+    if (isNaN(val) || val < 1) { val = 15; }
+    // hiddenフィールドに値をセットしてからselectをdisabledにする
+    var hidden = document.createElement('input');
+    hidden.type  = 'hidden';
+    hidden.name  = 'delay';
+    hidden.value = val;
+    // 既存のselectをdisableして送信から除外
+    delaySelect.disabled = true;
+    this.appendChild(hidden);
   }
 });
 </script>
@@ -410,7 +417,7 @@ $modeItems = @()
 @(
     @{ Label = T 'Mode_Shutdown'; Value = "-s" }
     @{ Label = T 'Mode_Restart';  Value = "-r" }
-    @{ Label = T 'Mode_Logoff';   Value = "-o" }
+    @{ Label = T 'Mode_Suspend';   Value = "-d" }
     @{ Label = T 'Mode_Hibernate'; Value = "-h" }
 ) | ForEach-Object {
     $item = New-Object System.Windows.Forms.MenuItem($_.Label)
@@ -418,10 +425,11 @@ $modeItems = @()
     $item.Checked = ($_.Value -eq $script:mode)
     $itemValue    = $_.Value
     $item.Add_Click({
-        $script:mode = $itemValue
-        Update-MenuCheck $modeItems $script:mode
-        Write-Log (T 'Log_ModeChanged' $script:mode)
-    })
+        $global:currentMode = $itemValue
+        Write-Log "DEBUG click mode=$global:currentMode"
+        Update-MenuCheck $modeItems $global:currentMode
+        Write-Log (T 'Log_ModeChanged' $global:currentMode)
+    }.GetNewClosure())
     $modeItems += $item
     $menuMode.MenuItems.Add($item) | Out-Null
 }
@@ -442,7 +450,7 @@ $delayItems = @()
         $script:delay = $itemValue
         Update-MenuCheck $delayItems $script:delay
         Write-Log (T 'Log_DelayChanged' $script:delay)
-    })
+    }.GetNewClosure())
     $delayItems += $item
     $menuDelay.MenuItems.Add($item) | Out-Null
 }
@@ -479,9 +487,10 @@ $script:cancelHandler = $null
 $script:contextTask = $listener.GetContextAsync()
 
 $timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = 100
+$timer.Interval = 200
 
 $timer.Add_Tick({
+    
     if (-not $listener.IsListening) { $timer.Stop(); return }
 
     if ($script:contextTask.IsCompleted) {
@@ -504,9 +513,10 @@ $timer.Add_Tick({
             else {
                 switch ($path) {
                     "/" {
-                        $html = Get-HtmlPage $config.Token
+                        $html = Get-HtmlPage $config.Token "" $global:currentMode $global:currentDelay
                         $body = [System.Text.Encoding]::UTF8.GetBytes($html)
                         $res.ContentType = "text/html; charset=utf-8"
+                        $res.Headers.Add("Cache-Control", "no-store")
                         $res.OutputStream.Write($body, 0, $body.Length)
                         $res.Close()
                     }
@@ -519,7 +529,7 @@ $timer.Add_Tick({
                     "/exec" {
                         $m = $req.QueryString["mode"]
                         $d = $req.QueryString["delay"]
-                        if ($m -notin @("-s","-r","-o","-h")) { $m = "-s" }
+                        if ($m -notin @("-s","-r","-d","-h")) { $m = "-s" }
                         if (-not ($d -match '^\d+$')) { $d = "15" }
                         Invoke-ShutdownAction $m $d $req.RemoteEndPoint
                         $redirectUrl = if ($config.Token -ne "") { "/?token=$($config.Token)" } else { "/" }
