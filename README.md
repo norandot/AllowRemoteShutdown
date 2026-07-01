@@ -33,17 +33,21 @@ https://learn.microsoft.com/ja-jp/sysinternals/downloads/psshutdown
 ### 手順1：URL ACLの登録
 
 非特権ユーザーによるHTTP待機を許可するため、以下のコマンドを実行します。  
+```Powershell
 netsh http add urlacl url=http://+:8080/ user=Everyone
-
+```
 ### 手順2：ファイアウォールの解放
 
-外部端末からのアクセスを許可するための受信規則（TCP 8080ポート）を追加します。  
+外部端末からのアクセスを許可するための受信規則（TCP 8080ポート）を追加します。
+```Powershell
 New-NetFirewallRule \-DisplayName "Allow Remote Shutdown" \-Direction Inbound \-LocalPort 8080 \-Protocol TCP \-Action Allow
-
+```
 ### 手順3：バックグラウンド起動ショートカットの作成
 
 ウィンドウを表示せずに起動するためのショートカットを作成します。ショートカットの「リンク先」に以下の形式で記述してください。  
+```
 powershell.exe \-WindowStyle Hidden \-ExecutionPolicy Bypass \-File "C:\（PSShutdownのパス）\AllowRemoteShutdown.ps1"
+```
 
 ※ ExecutionPolicy Bypass を付与することで、環境の実行ポリシー設定に関わらず動作させることができます。
 
@@ -76,10 +80,10 @@ powershell.exe \-WindowStyle Hidden \-ExecutionPolicy Bypass \-File "C:\（PSShu
 
 * **日本語の文字化け** : PowerShell 5.1は、BOMのないUTF-8ファイルを正しく解読できません。スクリプトを編集して保存する際は、必ず  **「BOM付き UTF-8」**  エンコーディングを選択してください。  
 * **接続拒否 (Connection Refused)** :  
-* Windowsのネットワークプロファイルが  **「プライベート」**  になっているか確認してください。「パブリック」ではOSレベルで外部アクセスが遮断されます。  
-* netsh http show urlacl を実行し、対象のポートが正しく予約されているか確認してください。  
+ Windowsのネットワークプロファイルが  **「プライベート」**  になっているか確認してください。「パブリック」ではOSレベルで外部アクセスが遮断されます。  
+ netsh http show urlacl を実行し、対象のポートが正しく予約されているか確認してください。  
 * **二重起動・ゾンビプロセスの発生** :  
-* 既に同じポートが使用されている場合、起動に失敗します。タスクマネージャーで powershell.exe のプロセスを確認し、古いプロセスが残っている場合は終了させてください。  
+ 既に同じポートが使用されている場合、起動に失敗します。タスクマネージャーで powershell.exe のプロセスを確認し、古いプロセスが残っている場合は終了させてください。  
 * **監査** : 動作の詳細は AllowRemoteShutdown.log に記録されます。通信の成否や認証エラーの履歴はこちらを確認してください。
 
 ## ライセンス・免責事項
