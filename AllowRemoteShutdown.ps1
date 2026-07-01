@@ -24,6 +24,10 @@ $consoleHwnd = [ConsoleWindow]::GetConsoleWindow()
 # English: Edit $config below. Language may be "ja" / "en" / "auto".
 $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 
+# PSShutdown.exe の共通パス（必要に応じて編集してください）
+# Shared path to PSShutdown.exe (edit if needed)
+$psShutdownPath = "C:\PSTools\psshutdown.exe"
+
 $config = @{
     Port         = 8080
     Host         = "http://+:{0}/"
@@ -46,12 +50,12 @@ $config = @{
     # Optional access token
     Token        = ""
     ShowConsole  = $false
-    # PSShutdown.exe のパス
-    # Path to PSShutdown.exe
-    ShutdownCmd  = "C:\PSTools\psshutdown.exe"
-    # PSShutdown.exe のパス
-    # Path to PSShutdown.exe
-    AbortCmd     = "C:\PSTools\psshutdown.exe"
+    # PSShutdown.exe のパス（共通変数 $psShutdownPath を使用）
+    # Path to PSShutdown.exe (uses shared $psShutdownPath)
+    ShutdownCmd  = $psShutdownPath
+    # PSShutdown.exe のパス（共通変数 $psShutdownPath を使用）
+    # Path to PSShutdown.exe (uses shared $psShutdownPath)
+    AbortCmd     = $psShutdownPath
     AbortArgs    = "-a"
     LogFile      = "$scriptDir\AllowRemoteShutdown.log"
 }
@@ -517,7 +521,7 @@ $timer.Add_Tick({
                             $icon.ShowBalloonTip(3000)
                         } catch { }
                         $msgEncoded = [System.Web.HttpUtility]::UrlEncode(T('AbortDoneMsg'))
-                        $redirectUrl = if ($config.Token -ne "") { "/?token=$($config.Token)&msg=$msgEncoded" } else { "/?msg=$msgEncoded" }
+                        $redirectUrl = if ($config.Token -ne "") { "/?token=$($config.Token)\u0026msg=$msgEncoded" } else { "/?msg=$msgEncoded" }
                         $res.Redirect($redirectUrl)
                         $res.Close()
                     }
