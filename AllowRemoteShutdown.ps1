@@ -18,35 +18,190 @@ $consoleHwnd = [ConsoleWindow]::GetConsoleWindow()
 
 # ============================================================
 # 設定（ここだけ編集する）
+# Configuration - edit this section only
 # ============================================================
+# 日本語: 以下の $config を編集してください。Language は "ja" / "en" / "auto" を指定できます。
+# English: Edit $config below. Language may be "ja" / "en" / "auto".
 $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+
+# PSShutdown.exe の共通パス（必要に応じて編集してください）
+# Shared path to PSShutdown.exe (edit if needed)
+$psShutdownPath = "C:\PSTools\psshutdown.exe"
 
 $config = @{
     Port         = 8080
     Host         = "http://+:{0}/"
+    # トレイに表示するテキスト。デフォルトは多言語化された文字列に置き換えられます。
+    # Tray text shown in the system tray. Default will be replaced by i18n strings.
     TrayText     = "AllowRemoteShutdown"
+    # shell32.dll のアイコンインデックス (既定 27)。カスタムアイコンを使う場合は UseCustomIcon を $true にし、IconPath を指定してください。
+    # Icon index in shell32.dll (default 27). To use a custom icon, set UseCustomIcon=$true and specify IconPath.
     IconIndex    = 27
-    Token        = "" #アクセストークンを任意に設定する
+    # カスタムアイコンのパス（.ico ファイルなど）。空文字なら shell32 を使用します。
+    # Custom icon path (.ico). If empty, shell32 with IconIndex is used.
+    IconPath     = ""
+    # カスタムアイコンを有効にするフラグ。デフォルトは $false（shell32 を使用）。
+    # Enable custom icon flag. Default $false uses shell32 icon.
+    UseCustomIcon = $false
+    # 言語設定: "auto"(既定) / "ja" / "en"
+    # Language: "auto" (default) / "ja" / "en"
+    Language     = "auto"
+    # アクセストークンを任意に設定する
+    # Optional access token
+    Token        = ""
     ShowConsole  = $false
-    ShutdownCmd  = "C:\PSTools\psshutdown.exe"#PSShutdown.exeのパス
-    AbortCmd     = "C:\PSTools\psshutdown.exe"#PSShutdown.exeのパス
+    # PSShutdown.exe のパス（共通変数 $psShutdownPath を使用）
+    # Path to PSShutdown.exe (uses shared $psShutdownPath)
+    ShutdownCmd  = $psShutdownPath
+    # PSShutdown.exe のパス（共通変数 $psShutdownPath を使用）
+    # Path to PSShutdown.exe (uses shared $psShutdownPath)
+    AbortCmd     = $psShutdownPath
     AbortArgs    = "-a"
     LogFile      = "$scriptDir\AllowRemoteShutdown.log"
 }
 
 # トレイメニューの選択状態（一時的、再起動でデフォルトに戻る）
+# Tray menu selection state (temporary, reverts to default on restart)
 $script:mode  = "-s"
 $script:delay = "15"
 # ============================================================
 
+# --- ロケール判定と言語選択 ---
+# Locale detection and language selection
+function Get-EffectiveLanguage {
+    param()
+    $lang = $config.Language
+    if ($lang -eq "auto") {
+        try {
+            $ci = [System.Globalization.CultureInfo]::InstalledUICulture.Name
+            if ($ci -like "ja*") { return "ja" }
+        } catch { }
+        return "en"
+    }
+    return $lang
+}
+
+# --- 多言語文字列定義 ---
+# Multilingual string dictionary
+$strings = @{
+    ja = @{
+        TrayText = "AllowRemoteShutdown"
+        MenuMode = "クイックオフのモード"
+        Mode_Shutdown = "シャットダウン"
+        Mode_Restart  = "再起動"
+        Mode_Logoff   = "ログオフ"
+        Mode_Hibernate= "休止"
+        MenuDelay = "クイックオフの遅延"
+        Delay_15 = "15秒"
+        Delay_30 = "30秒"
+        Delay_60 = "60秒"
+        Delay_Custom = "任意秒数"
+        MenuShowLog = "ログを表示／非表示"
+        MenuExit = "終了"
+        QuickButton = "クイックオフ（現在: {0} / {1}秒）"
+        ExecuteButton = "実行"
+        AbortButton = "シャットダウン中止"
+        AbortDoneMsg = "中止しました"
+        RunningBalloon = "実行しました。クリックで中止。（{0}秒）"
+        AbortedBalloon = "中止しました"
+        Log_ServerStarted = "サーバー起動中 → {0} (終了はトレイアイコンから)"
+        Log_RequestAuthFailed = "認証失敗 [{0}]"
+        Log_RequestError = "リクエスト処理エラー: {0}"
+        Log_Invoke = "実行: {0} 遅延 {1} 秒 [{2}]"
+        Log_AbortByWeb = "中止: Web操作により中止 [{0}]"
+        Log_AbortByUser = "中止: ユーザー操作により中止"
+        Log_ModeChanged = "クイックオフのモード変更: {0}"
+        Log_DelayChanged = "クイックオフの遅延変更: {0} 秒"
+        Log_Cleanup = "サーバーを停止しました"
+        CustomDelayPlaceholder = "秒数"
+    }
+    en = @{
+        TrayText = "AllowRemoteShutdown"
+        MenuMode = "Quick-off Mode"
+        Mode_Shutdown = "Shutdown"
+        Mode_Restart  = "Restart"
+        Mode_Logoff   = "Log off"
+        Mode_Hibernate= "Hibernate"
+        MenuDelay = "Quick-off Delay"
+        Delay_15 = "15s"
+        Delay_30 = "30s"
+        Delay_60 = "60s"
+        Delay_Custom = "Custom seconds"
+        MenuShowLog = "Show/Hide Log"
+        MenuExit = "Exit"
+        QuickButton = "Quick Off (current: {0} / {1}s)"
+        ExecuteButton = "Execute"
+        AbortButton = "Abort Shutdown"
+        AbortDoneMsg = "Aborted"
+        RunningBalloon = "Started. Click to abort. ({0}s)"
+        AbortedBalloon = "Aborted"
+        Log_ServerStarted = "Server started → {0} (stop from tray icon)"
+        Log_RequestAuthFailed = "Auth failed [{0}]"
+        Log_RequestError = "Request handling error: {0}"
+        Log_Invoke = "Invoke: {0} delay {1} sec [{2}]"
+        Log_AbortByWeb = "Abort: aborted by web operation [{0}]"
+        Log_AbortByUser = "Abort: aborted by user action"
+        Log_ModeChanged = "Quick-off mode changed: {0}"
+        Log_DelayChanged = "Quick-off delay changed: {0} sec"
+        Log_Cleanup = "Server stopped"
+        CustomDelayPlaceholder = "seconds"
+    }
+}
+
+$script:lang = Get-EffectiveLanguage
+
+# --- 翻訳ヘルパー関数 ---
+# Translation helper function
+function T {
+    param([string]$key, [Parameter(ValueFromRemainingArguments=$true)][object[]]$args)
+    $loc = $script:lang
+    if (-not $strings.ContainsKey($loc)) { $loc = 'en' }
+    if (-not $strings[$loc].ContainsKey($key)) { return "<$key>" }
+    $fmt = $strings[$loc][$key]
+    if ($args -and $args.Length -gt 0) {
+        return [string]::Format($fmt, $args)
+    }
+    return $fmt
+}
+
+# --- ログ出力関数（堅牢化） ---
+# Logging output function (robust)
 function Write-Log {
     param($message)
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $line = "$timestamp $message"
-    Write-Host $line
-    Add-Content -Path $config.LogFile -Value $line -Encoding UTF8
+    try {
+        Write-Host $line
+        Add-Content -Path $config.LogFile -Value $line -Encoding UTF8
+    } catch {
+        # ログ書き込み失敗は致命的ではないがコンソールに出力する
+        # Log write failure is not fatal but output to console
+        Write-Host "Log write failed: $_" -ForegroundColor Yellow
+    }
 }
 
+# --- 安全な外部プロセス起動関数 ---
+# Safe external process invocation function
+function Safe-StartProcess {
+    param([string]$file, [string[]]$args)
+    try {
+        if ($args) {
+            Start-Process $file -ArgumentList $args -WindowStyle Hidden -ErrorAction Stop
+        } else {
+            Start-Process $file -WindowStyle Hidden -ErrorAction Stop
+        }
+    } catch {
+        Write-Log "Start-Process failed: $file $args -> $_"
+        try {
+            $icon.BalloonTipTitle = T('TrayText')
+            $icon.BalloonTipText  = "Error: $file"
+            $icon.ShowBalloonTip(3000)
+        } catch { }
+    }
+}
+
+# --- shell32 からアイコンを抽出する関数 ---
+# Extract icon from shell32.dll function
 function New-IconFromShell32 {
     param($index)
     if (-not ([System.Management.Automation.PSTypeName]'Shell32Icon').Type) {
@@ -64,6 +219,22 @@ function New-IconFromShell32 {
     return [System.Drawing.Icon]::FromHandle($hIcon)
 }
 
+# --- トレイアイコンを読み込む関数 ---
+# Load tray icon function
+function Load-TrayIcon {
+    param($cfg)
+    if ($cfg.UseCustomIcon -and $cfg.IconPath -ne "" -and (Test-Path $cfg.IconPath)) {
+        try {
+            return [System.Drawing.Icon]::ExtractAssociatedIcon($cfg.IconPath)
+        } catch {
+            Write-Log "Custom icon load failed: $($cfg.IconPath) -> $_"
+        }
+    }
+    return New-IconFromShell32 $cfg.IconIndex
+}
+
+# --- メニューのチェック状態を更新する関数 ---
+# Update menu check state function
 function Update-MenuCheck {
     param($items, $value)
     foreach ($item in $items) {
@@ -71,39 +242,60 @@ function Update-MenuCheck {
     }
 }
 
+# --- シャットダウン処理を実行する関数 ---
+# Invoke shutdown action function
 function Invoke-ShutdownAction {
     param($mode, $delaySeconds, $remoteEndPoint)
     $args = "$mode -f -t $delaySeconds -v 10 -c"
-    Write-Log "実行: $mode 遅延 $delaySeconds 秒 [$remoteEndPoint]"
+    Write-Log (T('Log_Invoke', $mode, $delaySeconds, $remoteEndPoint))
 
     if ($script:cancelHandler) {
-        $icon.remove_BalloonTipClicked($script:cancelHandler)
+        try { $icon.remove_BalloonTipClicked($script:cancelHandler) } catch { }
     }
     $script:cancelHandler = {
-        Start-Process $config.AbortCmd -ArgumentList $config.AbortArgs -WindowStyle Hidden
-        Write-Log "中止: ユーザー操作により中止"
-        $icon.BalloonTipTitle = $config.TrayText
-        $icon.BalloonTipText  = "中止しました"
-        $icon.ShowBalloonTip(3000)
+        Safe-StartProcess $config.AbortCmd @($config.AbortArgs)
+        Write-Log (T('Log_AbortByUser'))
+        try {
+            $icon.BalloonTipTitle = T('TrayText')
+            $icon.BalloonTipText  = T('AbortedBalloon')
+            $icon.ShowBalloonTip(3000)
+        } catch { }
     }
     $icon.add_BalloonTipClicked($script:cancelHandler)
 
-    $icon.BalloonTipTitle = $config.TrayText
-    $icon.BalloonTipText  = "実行しました。クリックで中止。（${delaySeconds}秒）"
-    $icon.ShowBalloonTip([int]$delaySeconds * 1000)
+    try {
+        $icon.BalloonTipTitle = T('TrayText')
+        $icon.BalloonTipText  = T('RunningBalloon', $delaySeconds)
+        $icon.ShowBalloonTip([int]$delaySeconds * 1000)
+    } catch { }
 
-    Start-Process $config.ShutdownCmd -ArgumentList $args -WindowStyle Hidden
+    Safe-StartProcess $config.ShutdownCmd @($args)
 }
 
-# --- HTMLページ生成 ---
+# --- HTMLページ生成関数 ---
+# Generate HTML page function
 function Get-HtmlPage {
     param($token, $message = "")
     $tokenQuery = if ($token -ne "") { "?token=$token" } else { "" }
-    $msgHtml = if ($message -ne "") { "<p class='msg'>$message</p>" } else { "" }
+    $msgHtml = if ($message -ne "") { "<p class='msg'>$([System.Web.HttpUtility]::HtmlEncode($message))</p>" } else { "" }
+    $langAttr = $script:lang
+
+    $quickLabel = [System.Web.HttpUtility]::HtmlEncode((T('QuickButton', $script:mode, $script:delay)))
+    $execLabel = [System.Web.HttpUtility]::HtmlEncode(T('ExecuteButton'))
+    $abortLabel = [System.Web.HttpUtility]::HtmlEncode(T('AbortButton'))
+    $modeOption_Shutdown = [System.Web.HttpUtility]::HtmlEncode(T('Mode_Shutdown'))
+    $modeOption_Restart  = [System.Web.HttpUtility]::HtmlEncode(T('Mode_Restart'))
+    $modeOption_Logoff   = [System.Web.HttpUtility]::HtmlEncode(T('Mode_Logoff'))
+    $modeOption_Hibernate= [System.Web.HttpUtility]::HtmlEncode(T('Mode_Hibernate'))
+    $delayOption_15 = [System.Web.HttpUtility]::HtmlEncode(T('Delay_15'))
+    $delayOption_30 = [System.Web.HttpUtility]::HtmlEncode(T('Delay_30'))
+    $delayOption_60 = [System.Web.HttpUtility]::HtmlEncode(T('Delay_60'))
+    $delayOption_Custom = [System.Web.HttpUtility]::HtmlEncode(T('Delay_Custom'))
+    $delayPlaceholder = [System.Web.HttpUtility]::HtmlEncode(T('CustomDelayPlaceholder'))
 
     @"
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="$langAttr">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -132,32 +324,32 @@ function Get-HtmlPage {
 $msgHtml
 
 <form method="GET" action="/quick$tokenQuery">
-  <button class="quick" type="submit">クイックオフ（現在: $script:mode / ${script:delay}秒）</button>
+  <button class="quick" type="submit">$quickLabel</button>
 </form>
 
 <div class="row">
   <form method="GET" action="/exec" style="display:inline;">
     <input type="hidden" name="token" value="$token">
     <select name="mode">
-      <option value="-s">シャットダウン</option>
-      <option value="-r">再起動</option>
-      <option value="-o">ログオフ</option>
-      <option value="-h">休止</option>
+      <option value="-s">$modeOption_Shutdown</option>
+      <option value="-r">$modeOption_Restart</option>
+      <option value="-o">$modeOption_Logoff</option>
+      <option value="-h">$modeOption_Hibernate</option>
     </select>
     <select name="delay">
-      <option value="15">15秒</option>
-      <option value="30">30秒</option>
-      <option value="60">60秒</option>
-      <option value="custom">任意秒数</option>
+      <option value="15">$delayOption_15</option>
+      <option value="30">$delayOption_30</option>
+      <option value="60">$delayOption_60</option>
+      <option value="custom">$delayOption_Custom</option>
     </select>
-    <input type="number" name="customDelay" placeholder="秒数" min="0" style="width:70px; display:none;" id="customDelay">
+    <input type="number" name="customDelay" placeholder="$delayPlaceholder" min="0" style="width:70px; display:none;" id="customDelay">
     <br>
-    <button class="shutdown" type="submit">実行</button>
+    <button class="shutdown" type="submit">$execLabel</button>
   </form>
 </div>
 
 <form method="GET" action="/abort$tokenQuery">
-  <button class="abort" type="submit">シャットダウン中止</button>
+  <button class="abort" type="submit">$abortLabel</button>
 </form>
 
 <script>
@@ -176,31 +368,34 @@ document.querySelector('form[action="/exec"]').addEventListener('submit', functi
 "@
 }
 
-# --- HTTPリスナー起動 ---
+# --- HTTPリスナーを起動 ---
+# Start HTTP listener
 $prefix = $config.Host -f $config.Port
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add($prefix)
 $listener.Start()
-Write-Log "サーバー起動中 → $prefix (終了はトレイアイコンから)"
+Write-Log (T('Log_ServerStarted', $prefix))
 
-# --- タスクトレイアイコン ---
-$trayIcon = New-IconFromShell32 $config.IconIndex
+# --- タスクトレイアイコンを設定 ---
+# Set up task tray icon
+$trayIcon = Load-TrayIcon $config
 
 $icon = New-Object System.Windows.Forms.NotifyIcon
 $icon.Icon    = $trayIcon
 $icon.Visible = $true
-$icon.Text    = $config.TrayText
+$icon.Text    = T('TrayText')
 
-# --- メニュー構築 ---
+# --- コンテキストメニューを構築 ---
+# Build context menu
 $menu = New-Object System.Windows.Forms.ContextMenu
 
-$menuMode = New-Object System.Windows.Forms.MenuItem("クイックオフのモード")
+$menuMode = New-Object System.Windows.Forms.MenuItem(T('MenuMode'))
 $modeItems = @()
 @(
-    @{ Label = "シャットダウン"; Value = "-s" }
-    @{ Label = "再起動";         Value = "-r" }
-    @{ Label = "ログオフ";       Value = "-o" }
-    @{ Label = "休止";           Value = "-h" }
+    @{ Label = T('Mode_Shutdown'); Value = "-s" }
+    @{ Label = T('Mode_Restart');  Value = "-r" }
+    @{ Label = T('Mode_Logoff');   Value = "-o" }
+    @{ Label = T('Mode_Hibernate');Value = "-h" }
 ) | ForEach-Object {
     $item = New-Object System.Windows.Forms.MenuItem($_.Label)
     $item.Tag     = $_.Value
@@ -209,19 +404,19 @@ $modeItems = @()
     $item.Add_Click({
         $script:mode = $itemValue
         Update-MenuCheck $modeItems $script:mode
-        Write-Log "クイックオフのモード変更: $script:mode"
+        Write-Log (T('Log_ModeChanged', $script:mode))
     })
     $modeItems += $item
     $menuMode.MenuItems.Add($item) | Out-Null
 }
 $menu.MenuItems.Add($menuMode) | Out-Null
 
-$menuDelay = New-Object System.Windows.Forms.MenuItem("クイックオフの遅延")
+$menuDelay = New-Object System.Windows.Forms.MenuItem(T('MenuDelay'))
 $delayItems = @()
 @(
-    @{ Label = "15秒"; Value = "15" }
-    @{ Label = "30秒"; Value = "30" }
-    @{ Label = "60秒"; Value = "60" }
+    @{ Label = T('Delay_15'); Value = "15" }
+    @{ Label = T('Delay_30'); Value = "30" }
+    @{ Label = T('Delay_60'); Value = "60" }
 ) | ForEach-Object {
     $item = New-Object System.Windows.Forms.MenuItem($_.Label)
     $item.Tag     = $_.Value
@@ -230,7 +425,7 @@ $delayItems = @()
     $item.Add_Click({
         $script:delay = $itemValue
         Update-MenuCheck $delayItems $script:delay
-        Write-Log "クイックオフの遅延変更: $script:delay 秒"
+        Write-Log (T('Log_DelayChanged', $script:delay))
     })
     $delayItems += $item
     $menuDelay.MenuItems.Add($item) | Out-Null
@@ -239,7 +434,7 @@ $menu.MenuItems.Add($menuDelay) | Out-Null
 
 $menu.MenuItems.Add("-") | Out-Null
 
-$menu.MenuItems.Add("ログを表示／非表示", {
+$menu.MenuItems.Add(T('MenuShowLog'), {
     if ($config.ShowConsole) {
         [ConsoleWindow]::ShowWindow($consoleHwnd, 0) | Out-Null
         $config.ShowConsole = $false
@@ -249,7 +444,7 @@ $menu.MenuItems.Add("ログを表示／非表示", {
     }
 }) | Out-Null
 
-$menu.MenuItems.Add("終了", {
+$menu.MenuItems.Add(T('MenuExit'), {
     $timer.Stop()
     $listener.Stop()
     $icon.Visible = $false
@@ -260,7 +455,8 @@ $menu.MenuItems.Add("終了", {
 
 $icon.ContextMenu = $menu
 
-# --- タイマーポーリング ---
+# --- タイマーポーリング処理を開始 ---
+# Start timer polling
 $script:cancelHandler = $null
 $script:contextTask = $listener.GetContextAsync()
 
@@ -285,7 +481,7 @@ $timer.Add_Tick({
                 $body = [System.Text.Encoding]::UTF8.GetBytes("Forbidden.")
                 $res.OutputStream.Write($body, 0, $body.Length)
                 $res.Close()
-                Write-Log "認証失敗 [$($req.RemoteEndPoint)]"
+                Write-Log (T('Log_RequestAuthFailed', $req.RemoteEndPoint))
             }
             else {
                 switch ($path) {
@@ -313,16 +509,19 @@ $timer.Add_Tick({
                         $res.Close()
                     }
                     "/abort" {
-                        Start-Process $config.AbortCmd -ArgumentList $config.AbortArgs -WindowStyle Hidden
-                        Write-Log "中止: Web操作により中止 [$($req.RemoteEndPoint)]"
+                        Safe-StartProcess $config.AbortCmd @($config.AbortArgs)
+                        Write-Log (T('Log_AbortByWeb', $req.RemoteEndPoint))
                         if ($script:cancelHandler) {
-                            $icon.remove_BalloonTipClicked($script:cancelHandler)
+                            try { $icon.remove_BalloonTipClicked($script:cancelHandler) } catch { }
                             $script:cancelHandler = $null
                         }
-                        $icon.BalloonTipTitle = $config.TrayText
-                        $icon.BalloonTipText  = "中止しました"
-                        $icon.ShowBalloonTip(3000)
-                        $redirectUrl = if ($config.Token -ne "") { "/?token=$($config.Token)&msg=中止しました" } else { "/?msg=中止しました" }
+                        try {
+                            $icon.BalloonTipTitle = T('TrayText')
+                            $icon.BalloonTipText  = T('AbortedBalloon')
+                            $icon.ShowBalloonTip(3000)
+                        } catch { }
+                        $msgEncoded = [System.Web.HttpUtility]::UrlEncode(T('AbortDoneMsg'))
+                        $redirectUrl = if ($config.Token -ne "") { "/?token=$($config.Token)\u0026msg=$msgEncoded" } else { "/?msg=$msgEncoded" }
                         $res.Redirect($redirectUrl)
                         $res.Close()
                     }
@@ -335,7 +534,7 @@ $timer.Add_Tick({
                 }
             }
         } catch {
-            Write-Log "リクエスト処理エラー: $_"
+            Write-Log (T('Log_RequestError', "$_"))
         }
 
         $script:contextTask = $listener.GetContextAsync()
@@ -343,13 +542,15 @@ $timer.Add_Tick({
 })
 $timer.Start()
 
-# --- UIメッセージループ ---
+# --- UIメッセージループを実行 ---
+# Run UI message loop
 [System.Windows.Forms.Application]::Run()
 
-# --- クリーンアップ ---
+# --- クリーンアップ処理を実行 ---
+# Perform cleanup
 $timer.Stop()
 $timer.Dispose()
 if ($listener.IsListening) { $listener.Stop() }
 $icon.Visible = $false
 $trayIcon.Dispose()
-Write-Log "サーバーを停止しました"
+Write-Log (T('Log_Cleanup'))
