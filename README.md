@@ -1,5 +1,5 @@
 # AllowRemoteShutdown
-
+[English version is here](./README.en.md)
 ## 概要
 
 **AllowRemoteShutdown**  は、PowerShell標準の HttpListener と Microsoft Sysinternals 製の psshutdown.exe を組み合わせた、軽量かつ透明性の高いリモート電源管理サーバーです。本プロジェクトの最大のコンセプトは「透明性」です。外部のブラックボックスな実行ファイルに依存せず、すべてのロジックを検証可能なPowerShellスクリプトで記述しています。中・上級ユーザーがコードの内容を精査し、自身の環境に合わせて自由にカスタマイズして導入できるよう設計されています。
