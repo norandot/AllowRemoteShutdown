@@ -521,7 +521,7 @@ $timer.Add_Tick({
                         $res.Close()
                     }
                     "/quick" {
-                        Invoke-ShutdownAction $script:mode $script:delay $req.RemoteEndPoint
+                        Invoke-ShutdownAction $global:currentMode $global:currentDelay $req.RemoteEndPoint
                         $redirectUrl = if ($config.Token -ne "") { "/?token=$($config.Token)" } else { "/" }
                         $res.Redirect($redirectUrl)
                         $res.Close()
