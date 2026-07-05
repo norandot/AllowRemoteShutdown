@@ -17,57 +17,91 @@ $consoleHwnd = [ConsoleWindow]::GetConsoleWindow()
 [ConsoleWindow]::ShowWindow($consoleHwnd, 0) | Out-Null
 
 # ============================================================
+# 管理者権限チェック（D1）
+# Administrator privilege check (D1)
+# ------------------------------------------------------------
+# 日本語: 本ツールはpsshutdown.exeがシャットダウン特権を要求する関係上、
+#         管理者権限での起動を正式仕様とする。非管理者起動のまま常駐させると、
+#         psshutdown実行時にUACの昇格要求が繰り返し表示され、Windows Formsの
+#         メッセージポンプと競合して操作不能になる不具合が実機で確認されている。
+#         そのため、非管理者権限での起動を検出した時点で警告を表示し終了する。
+# English: This tool requires Administrator privileges because psshutdown.exe
+#          needs shutdown-related privileges. Running without admin rights can
+#          cause a UAC prompt loop that freezes the Windows Forms message pump,
+#          making the app unresponsive (confirmed on real hardware). Therefore,
+#          the script checks for admin rights at startup and exits with a
+#          warning if not elevated.
+$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+$isAdmin = $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    [System.Windows.Forms.MessageBox]::Show(
+        "AllowRemoteShutdown は管理者権限での実行が必要です。`r`n" +
+        "ショートカットのプロパティ→詳細設定→「管理者として実行」を有効にしてください。`r`n`r`n" +
+        "AllowRemoteShutdown requires Administrator privileges.`r`n" +
+        "Please enable 'Run as administrator' in the shortcut's Advanced properties.",
+        "AllowRemoteShutdown - Administrator rights required",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Warning
+    ) | Out-Null
+    Exit
+}
+
+# ============================================================
+# 多重起動防止（B4）
+# Prevent multiple instances (B4)
+# ------------------------------------------------------------
+# 日本語: 同一マシン上での多重起動を防ぐため、Global名前空間のMutexで排他制御する。
+#         Global\ を付与することで、別ユーザーセッションからの多重起動も防止する。
+# English: Uses a named Mutex in the Global namespace to prevent multiple
+#          instances on the same machine, including across different user
+#          sessions (Global\ prefix).
+$mutexName = "Global\AllowRemoteShutdown_Mutex_8080"
+$createdNew = $false
+$script:appMutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
+if (-not $createdNew) {
+    [System.Windows.Forms.MessageBox]::Show(
+        "AllowRemoteShutdown は既に起動しています。`r`n" +
+        "AllowRemoteShutdown is already running.",
+        "AllowRemoteShutdown",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Information
+    ) | Out-Null
+    Exit
+}
+
+# ============================================================
 # 設定（ここだけ編集する）
 # Configuration - edit this section only
 # ============================================================
-# 日本語: 以下の $config を編集してください。Language は "ja" / "en" / "auto" を指定できます。
-# English: Edit $config below. Language may be "ja" / "en" / "auto".
 $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 
-# PSShutdown.exe の共通パス（必要に応じて編集してください）
-# Shared path to PSShutdown.exe (edit if needed)
 $psShutdownPath = "C:\Utility\PSTools\psshutdown.exe"
 
 $config = @{
     Port         = 8080
     Host         = "http://+:{0}/"
-    # トレイに表示するテキスト。デフォルトは多言語化された文字列に置き換えられます。
-    # Tray text shown in the system tray. Default will be replaced by i18n strings.
     TrayText     = "AllowRemoteShutdown"
-    # shell32.dll のアイコンインデックス (既定 27)。カスタムアイコンを使う場合は UseCustomIcon を $true にし、IconPath を指定してください。
-    # Icon index in shell32.dll (default 27). To use a custom icon, set UseCustomIcon=$true and specify IconPath.
     IconIndex    = 27
-    # カスタムアイコンのパス（.ico ファイルなど）。空文字なら shell32 を使用します。
-    # Custom icon path (.ico). If empty, shell32 with IconIndex is used.
     IconPath     = ""
-    # カスタムアイコンを有効にするフラグ。デフォルトは $false（shell32 を使用）。
-    # Enable custom icon flag. Default $false uses shell32 icon.
     UseCustomIcon = $false
-    # 言語設定: "auto"(既定) / "ja" / "en"
-    # Language: "auto" (default) / "ja" / "en"
     Language     = "auto"
-    # アクセストークンを任意に設定する
-    # Optional access token
+    Skin         = "slate"
+    CustomSkinPath = ""
     Token        = ""
     ShowConsole  = $false
-    # PSShutdown.exe のパス（共通変数 $psShutdownPath を使用）
-    # Path to PSShutdown.exe (uses shared $psShutdownPath)
     ShutdownCmd  = $psShutdownPath
-    # PSShutdown.exe のパス（共通変数 $psShutdownPath を使用）
-    # Path to PSShutdown.exe (uses shared $psShutdownPath)
     AbortCmd     = $psShutdownPath
     AbortArgs    = "-a"
     LogFile      = "$scriptDir\AllowRemoteShutdown.log"
+    # デバッグログの出力可否（A5）。$true にするとDEBUG行がログ・コンソールに出力される。
+    # Whether to emit DEBUG log lines (A5). Set to $true to enable verbose debug output.
+    Debug        = $false
 }
 
-# トレイメニューの選択状態（一時的、再起動でデフォルトに戻る）
-# Tray menu selection state (temporary, reverts to default on restart)
 $global:currentMode  = "-s"
 $global:currentDelay = "15"
 # ============================================================
 
-# --- ロケール判定と言語選択 ---
-# Locale detection and language selection
 function Get-EffectiveLanguage {
     param()
     $lang = $config.Language
@@ -81,8 +115,6 @@ function Get-EffectiveLanguage {
     return $lang
 }
 
-# --- 多言語文字列定義 ---
-# Multilingual string dictionary
 $strings = @{
     ja = @{
         TrayText = "AllowRemoteShutdown"
@@ -91,6 +123,9 @@ $strings = @{
         Mode_Restart  = "再起動"
         Mode_Suspend   = "サスペンド"
         Mode_Hibernate= "休止"
+        Mode_Logoff   = "ログオフ"
+        Mode_Lock     = "ロック"
+        Mode_MonitorOff = "モニターオフ（ロック）"
         MenuDelay = "クイックオフの遅延"
         Delay_15 = "15秒"
         Delay_30 = "30秒"
@@ -98,8 +133,11 @@ $strings = @{
         Delay_Custom = "任意秒数"
         MenuShowLog = "ログを表示／非表示"
         MenuExit = "終了"
-        QuickButton = "クイックオフ（現在: {0} / {1}秒）"
-        ExecuteButton = "実行"
+        QuickHeading = "ワンタップ実行"
+        QuickCurrentSetting = "現在の設定：{0} / {1}秒"
+        QuickButton = "今すぐ実行"
+        ChooseHeading = "モードを選んで実行"
+        ExecuteButton = "このモードで実行"
         AbortButton = "シャットダウン中止"
         AbortDoneMsg = "中止しました"
         RunningBalloon = "実行しました。クリックで中止。（{0}秒）"
@@ -122,6 +160,9 @@ $strings = @{
         Mode_Restart  = "Restart"
         Mode_Suspend   = "Suspend"
         Mode_Hibernate= "Hibernate"
+        Mode_Logoff   = "Log off"
+        Mode_Lock     = "Lock"
+        Mode_MonitorOff = "Monitor off (Lock)"
         MenuDelay = "Quick-off Delay"
         Delay_15 = "15s"
         Delay_30 = "30s"
@@ -129,8 +170,11 @@ $strings = @{
         Delay_Custom = "Custom seconds"
         MenuShowLog = "Show/Hide Log"
         MenuExit = "Exit"
-        QuickButton = "Quick Off (current: {0} / {1}s)"
-        ExecuteButton = "Execute"
+        QuickHeading = "One-Tap Execute"
+        QuickCurrentSetting = "Current setting: {0} / {1}s"
+        QuickButton = "Run Now"
+        ChooseHeading = "Choose a Mode to Execute"
+        ExecuteButton = "Run this Mode"
         AbortButton = "Abort Shutdown"
         AbortDoneMsg = "Aborted"
         RunningBalloon = "Started. Click to abort. ({0}s)"
@@ -150,8 +194,6 @@ $strings = @{
 
 $script:lang = Get-EffectiveLanguage
 
-# --- 翻訳ヘルパー関数 ---
-# Translation helper function
 function T {
     param([string]$key, [Parameter(ValueFromRemainingArguments=$true)][object[]]$args)
     $loc = $script:lang
@@ -164,8 +206,6 @@ function T {
     return $fmt
 }
 
-# --- ログ出力関数（堅牢化） ---
-# Logging output function (robust)
 function Write-Log {
     param($message)
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -174,21 +214,26 @@ function Write-Log {
         Write-Host $line
         Add-Content -Path $config.LogFile -Value $line -Encoding UTF8
     } catch {
-        # ログ書き込み失敗は致命的ではないがコンソールに出力する
-        # Log write failure is not fatal but output to console
         Write-Host "Log write failed: $_" -ForegroundColor Yellow
     }
 }
 
-### --- 安全な外部プロセス起動関数 ---
+# デバッグ用ログ出力（A5）。$config.Debug が $true の場合のみ出力される。
+# Debug-only log output (A5). Only emits when $config.Debug is $true.
+function Write-DebugLog {
+    param($message)
+    if ($config.Debug) {
+        Write-Log "DEBUG $message"
+    }
+}
+
 function Safe-StartProcess {
     param(
         [string]$file,
-        [string[]]$argList  # $args から名前を変更して自動変数との競合を回避
+        [string[]]$argList
     )
     try {
         if (Test-Path $file) {
-            # 引数リストをそのまま渡す
             Start-Process $file -ArgumentList $argList -WindowStyle Hidden -ErrorAction Stop
         } else {
             Write-Log "Error: File not found -> $file"
@@ -198,8 +243,6 @@ function Safe-StartProcess {
     }
 }
 
-# --- shell32 からアイコンを抽出する関数 ---
-# Extract icon from shell32.dll function
 function New-IconFromShell32 {
     param($index)
     if (-not ([System.Management.Automation.PSTypeName]'Shell32Icon').Type) {
@@ -217,8 +260,6 @@ function New-IconFromShell32 {
     return [System.Drawing.Icon]::FromHandle($hIcon)
 }
 
-# --- トレイアイコンを読み込む関数 ---
-# Load tray icon function
 function Load-TrayIcon {
     param($cfg)
     if ($cfg.UseCustomIcon -and $cfg.IconPath -ne "" -and (Test-Path $cfg.IconPath)) {
@@ -231,8 +272,6 @@ function Load-TrayIcon {
     return New-IconFromShell32 $cfg.IconIndex
 }
 
-# --- メニューのチェック状態を更新する関数 ---
-# Update menu check state function
 function Update-MenuCheck {
     param($items, $value)
     foreach ($item in $items) {
@@ -240,69 +279,205 @@ function Update-MenuCheck {
     }
 }
 
-# --- シャットダウン処理を実行する関数 ---
+# 内部コード（-s等）からローカライズ済みラベルへ変換する（B3）。
+# Converts an internal mode code (e.g. -s) to a localized label (B3).
+function Get-ModeLabel {
+    param([string]$modeCode)
+    switch ($modeCode) {
+        "-s" { return (T 'Mode_Shutdown') }
+        "-r" { return (T 'Mode_Restart') }
+        "-d" { return (T 'Mode_Suspend') }
+        "-h" { return (T 'Mode_Hibernate') }
+        "-o" { return (T 'Mode_Logoff') }
+        "-l" { return (T 'Mode_Lock') }
+        "-x" { return (T 'Mode_MonitorOff') }
+        default { return (T 'Mode_Shutdown') }
+    }
+}
+
+# CSSクラス名を取得する（Web UIの動的配色用）。
+# Returns the CSS class name for a given mode code (used for dynamic button coloring).
+function Get-ModeCssClass {
+    param([string]$modeCode)
+    switch ($modeCode) {
+        "-s" { return "shutdown" }
+        "-r" { return "restart" }
+        "-d" { return "suspend" }
+        "-h" { return "hibernate" }
+        "-o" { return "logoff" }
+        "-l" { return "lock" }
+        "-x" { return "monitoroff" }
+        default { return "shutdown" }
+    }
+}
+
 function Invoke-ShutdownAction {
     param($mode, $delaySeconds, $remoteEndPoint)
-    
-    # 1. 実行用の引数配列を構築
-    $argsArray = @($mode, "-f", "-t", "$delaySeconds", "-v", "10", "-c")
-    
-    # 2. ログ表示用のフルコマンドライン文字列を作成 (スペースで結合)
+
+    # Windows 11 / Lenovo 等の実機検証および Sysinternals 仕様に基づく特別処理：
+    # ロック (-l)、モニターオフ (-x) および ログオフ (-o) オプションはタイムアウト (-t) や強制終了 (-f) パラメータを受け付けません。
+    # そのため、これらの指定時は余分な引数を付与せずに即時呼び出しを行います。
+    # For Lock (-l), Monitor Off (-x) and Logoff (-o), execute immediately.
+    if ($mode -eq "-l" -or $mode -eq "-x" -or $mode -eq "-o") {
+        $argsArray = @($mode)
+        $delayToLog = "0"
+    } else {
+        $argsArray = @($mode, "-f", "-t", "$delaySeconds", "-v", "10", "-c")
+        $delayToLog = $delaySeconds
+    }
+
     $fullCmdLine = "$($config.ShutdownCmd) $($argsArray -join ' ')"
-    
-    # リモートエンドポイントが空の場合のケア
     $ep = if ($remoteEndPoint) { $remoteEndPoint } else { "Unknown" }
 
-    # 3. ログ出力
-    # 既存のサマリーログ
-    Write-Log (T 'Log_Invoke' $mode $delaySeconds $ep)
-    # 【追加】PSShutdownに渡す実際のコマンドラインを表示
+    Write-Log (T 'Log_Invoke' $mode $delayToLog $ep)
     Write-Log "Calling Process: $fullCmdLine"
 
-    # --- 中止ハンドラの設定（バルーン通知用） ---
     if ($script:cancelHandler) {
         try { $icon.remove_BalloonTipClicked($script:cancelHandler) } catch { }
     }
-    $script:cancelHandler = {
-        Safe-StartProcess $config.AbortCmd @("-a")
-        Write-Log (T 'Log_AbortByUser')
-        $icon.ShowBalloonTip(3000, (T 'TrayText'), (T 'AbortedBalloon'), 1)
+
+    # ロック・モニターオフ・ログオフ以外のカウントダウン時のみ、バルーン通知クリックによる中止イベントを登録
+    if ($mode -ne "-l" -and $mode -ne "-x" -and $mode -ne "-o") {
+        $script:cancelHandler = {
+            # A4: ハードコードされた "-a" ではなく $config.AbortArgs を参照する
+            # A4: reference $config.AbortArgs instead of the hardcoded "-a"
+            Safe-StartProcess $config.AbortCmd @($config.AbortArgs)
+            Write-Log (T 'Log_AbortByUser')
+            $icon.ShowBalloonTip(3000, (T 'TrayText'), (T 'AbortedBalloon'), 1)
+        }
+        $icon.add_BalloonTipClicked($script:cancelHandler)
+
+        try {
+            $msg = T 'RunningBalloon' $delaySeconds
+            $icon.ShowBalloonTip(([int]$delaySeconds * 1000), (T 'TrayText'), $msg, 1)
+        } catch { }
+    } else {
+        $script:cancelHandler = $null
     }
-    $icon.add_BalloonTipClicked($script:cancelHandler)
 
-    # --- 実行通知の表示 ---
-    try {
-        $msg = T 'RunningBalloon' $delaySeconds
-        $icon.ShowBalloonTip(([int]$delaySeconds * 1000), (T 'TrayText'), $msg, 1)
-    } catch { }
-
-    # 4. 実行
     Safe-StartProcess $config.ShutdownCmd $argsArray
 }
 
-
-# --- HTMLページ生成関数 ---
-# Generate HTML page function
 function Get-HtmlPage {
     param($token, $message = "", $currentMode = "-s", $currentDelay = "15")
-    Write-Log "DEBUG mode=$global:currentMode delay=$global:currentDelay" # DEBUG用追加
+    Write-DebugLog "Get-HtmlPage mode=$currentMode delay=$currentDelay"
     $tokenQuery = if ($token -ne "") { "?token=$token" } else { "" }
     $msgHtml = if ($message -ne "") { "<p class='msg'>$([System.Web.HttpUtility]::HtmlEncode($message))</p>" } else { "" }
     $langAttr = $script:lang
 
-    # ここスコープ前に全ての T() 呼び出しを評価
-    $quickLabel = [System.Web.HttpUtility]::HtmlEncode((T 'QuickButton' $currentMode $currentDelay))
+    # B3: 内部コードではなくローカライズ済みラベルを表示に使う
+    $currentModeLabel = [System.Web.HttpUtility]::HtmlEncode((Get-ModeLabel $currentMode))
+    $currentModeCss = Get-ModeCssClass $currentMode
+
+    $quickHeading = [System.Web.HttpUtility]::HtmlEncode((T 'QuickHeading'))
+    $quickCurrentSetting = [System.Web.HttpUtility]::HtmlEncode((T 'QuickCurrentSetting' $currentModeLabel $currentDelay))
+    $quickLabel = [System.Web.HttpUtility]::HtmlEncode((T 'QuickButton'))
+    $chooseHeading = [System.Web.HttpUtility]::HtmlEncode((T 'ChooseHeading'))
     $execLabel = [System.Web.HttpUtility]::HtmlEncode((T 'ExecuteButton'))
     $abortLabel = [System.Web.HttpUtility]::HtmlEncode((T 'AbortButton'))
     $modeOption_Shutdown = [System.Web.HttpUtility]::HtmlEncode((T 'Mode_Shutdown'))
     $modeOption_Restart  = [System.Web.HttpUtility]::HtmlEncode((T 'Mode_Restart'))
     $modeOption_Suspend   = [System.Web.HttpUtility]::HtmlEncode((T 'Mode_Suspend'))
     $modeOption_Hibernate= [System.Web.HttpUtility]::HtmlEncode((T 'Mode_Hibernate'))
+    $modeOption_Logoff   = [System.Web.HttpUtility]::HtmlEncode((T 'Mode_Logoff'))
+    $modeOption_Lock     = [System.Web.HttpUtility]::HtmlEncode((T 'Mode_Lock'))
+    $modeOption_MonitorOff = [System.Web.HttpUtility]::HtmlEncode((T 'Mode_MonitorOff'))
     $delayOption_15 = [System.Web.HttpUtility]::HtmlEncode((T 'Delay_15'))
     $delayOption_30 = [System.Web.HttpUtility]::HtmlEncode((T 'Delay_30'))
     $delayOption_60 = [System.Web.HttpUtility]::HtmlEncode((T 'Delay_60'))
     $delayOption_Custom = [System.Web.HttpUtility]::HtmlEncode((T 'Delay_Custom'))
     $delayPlaceholder = [System.Web.HttpUtility]::HtmlEncode((T 'CustomDelayPlaceholder'))
+
+    if ($config.CustomSkinPath -and (Test-Path $config.CustomSkinPath)) {
+        try {
+            $customHtml = Get-Content -Path $config.CustomSkinPath -Raw -Encoding UTF8
+            $customHtml = $customHtml.Replace('$token', $token)
+            $customHtml = $customHtml.Replace('$tokenQuery', $tokenQuery)
+            $customHtml = $customHtml.Replace('$msgHtml', $msgHtml)
+            $customHtml = $customHtml.Replace('$langAttr', $langAttr)
+            $customHtml = $customHtml.Replace('$trayText', $config.TrayText)
+            $customHtml = $customHtml.Replace('$quickHeading', $quickHeading)
+            $customHtml = $customHtml.Replace('$quickCurrentSetting', $quickCurrentSetting)
+            $customHtml = $customHtml.Replace('$quickLabel', $quickLabel)
+            $customHtml = $customHtml.Replace('$chooseHeading', $chooseHeading)
+            $customHtml = $customHtml.Replace('$execLabel', $execLabel)
+            $customHtml = $customHtml.Replace('$abortLabel', $abortLabel)
+            $customHtml = $customHtml.Replace('$currentModeCss', $currentModeCss)
+            return $customHtml
+        } catch {
+            Write-Log "Error loading custom skin file: $_. Falling back to built-in skins."
+        }
+    }
+
+    $skinStyles = ""
+    if ($config.Skin -eq "terminal") {
+        $skinStyles = @"
+  body { font-family: 'Courier New', monospace; background:#050505; color:#33ff33; text-align:center; padding:20px; text-shadow: 0 0 2px #33ff33; }
+  h1 { font-size:1.4em; border: 1px double #33ff33; padding: 10px; max-width:340px; margin:0 auto 20px; text-transform: uppercase; }
+  h2 { font-size:1em; color:#33ff33; font-weight:bold; margin:22px 0 6px; text-align:left; max-width:320px; margin-left:auto; margin-right:auto; }
+  .msg { color:#ff3333; margin-bottom:16px; border: 1px dashed #ff3333; padding: 8px; }
+  .current-setting { color:#88ff88; font-size:0.85em; margin:0 0 8px; }
+  form { margin-bottom:14px; }
+  button {
+    width:90%; max-width:320px; padding:12px; font-size:1.1em; font-family: 'Courier New', monospace;
+    margin:6px 0; border:1px solid #33ff33; background: transparent; color:#33ff33; cursor:pointer; text-transform: uppercase;
+  }
+  button:hover { background: #33ff33; color: #050505; text-shadow: none; box-shadow: 0 0 8px #33ff33; }
+  select, input[type=number] { padding:6px; font-size:1em; margin:4px; border:1px solid #33ff33; background:#050505; color:#33ff33; font-family: 'Courier New', monospace; }
+  .row { margin-bottom:10px; }
+  .abort { border:1px solid #ff3333; color:#ff3333; }
+  .abort:hover { background:#ff3333; color:#050505; box-shadow: 0 0 8px #ff3333; }
+"@
+    } elseif ($config.Skin -eq "minimal") {
+        $skinStyles = @"
+  body { font-family: ui-sans-serif, system-ui, sans-serif; background:#fafafa; color:#111; text-align:center; padding:24px; }
+  h1 { font-size:1.5em; font-weight: 800; letter-spacing: -0.025em; margin-bottom:24px; text-transform: uppercase; border-bottom: 2px solid #111; display: inline-block; padding-bottom: 4px; }
+  h2 { font-size:0.9em; color:#666; font-weight:700; text-transform: uppercase; letter-spacing: 0.05em; margin:24px 0 8px; text-align:left; max-width:320px; margin-left:auto; margin-right:auto; }
+  .msg { background:#fee2e2; color:#b91c1c; border:1px solid #f87171; padding:10px; font-size:0.9em; font-weight:600; margin-bottom:16px; max-width:320px; margin-left:auto; margin-right:auto; }
+  .current-setting { color:#4b5563; font-size:0.85em; margin:0 0 8px; font-weight: 500; }
+  form { margin-bottom:14px; }
+  button {
+    width:90%; max-width:320px; padding:12px; font-size:0.95em; font-weight: 700;
+    margin:6px 0; border:2px solid #111; background:#111; color:#fff; cursor:pointer; border-radius: 0px; text-transform: uppercase; transition: all 0.15s ease;
+  }
+  button:hover { background:#fff; color:#111; }
+  .shutdown:hover { border-color: #ef4444; color: #ef4444; }
+  .restart:hover { border-color: #3b82f6; color: #3b82f6; }
+  .suspend:hover { border-color: #6b7280; color: #6b7280; }
+  .hibernate:hover { border-color: #a855f7; color: #a855f7; }
+  .logoff:hover { border-color: #f59e0b; color: #f59e0b; }
+  .lock:hover { border-color: #06b6d4; color: #06b6d4; }
+  .monitoroff:hover { border-color: #f43f5e; color: #f43f5e; }
+  .abort { background: transparent; color:#111; border: 2px solid #ef4444; }
+  .abort:hover { background: #ef4444; color: #fff; }
+  select, input[type=number] { padding:8px; font-size:0.9em; margin:4px; border:2px solid #111; background:#fff; color:#111; font-weight: 600; border-radius: 0px; }
+  .row { margin-bottom:10px; }
+"@
+    } else {
+        # default slate
+        $skinStyles = @"
+  body { font-family: sans-serif; background:#1e1e1e; color:#eee; text-align:center; padding:20px; }
+  h1 { font-size:1.2em; margin-bottom:20px; }
+  h2 { font-size:0.95em; color:#aaa; font-weight:normal; margin:22px 0 6px; text-align:left; max-width:320px; margin-left:auto; margin-right:auto; }
+  .msg { color:#7fd; margin-bottom:16px; }
+  .current-setting { color:#9c9; font-size:0.85em; margin:0 0 8px; }
+  form { margin-bottom:14px; }
+  button {
+    width:90%; max-width:320px; padding:14px; font-size:1.1em;
+    margin:6px 0; border:none; border-radius:8px; cursor:pointer;
+  }
+  .shutdown  { background:#d44; color:#fff; }
+  .restart   { background:#48a; color:#fff; }
+  .suspend   { background:#888; color:#fff; }
+  .hibernate { background:#a6a; color:#fff; }
+  .logoff    { background:#c90; color:#fff; }
+  .lock      { background:#29a; color:#fff; }
+  .monitoroff { background:#a65; color:#fff; }
+  .abort     { background:#444; color:#fff; border:1px solid #777; }
+  select, input[type=number] { padding:8px; font-size:1em; margin:4px; border-radius:6px; border:none; }
+  .row { margin-bottom:10px; }
+"@
+    }
 
     @"
 <!DOCTYPE html>
@@ -312,42 +487,33 @@ function Get-HtmlPage {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>$($config.TrayText)</title>
 <style>
-  body { font-family: sans-serif; background:#1e1e1e; color:#eee; text-align:center; padding:20px; }
-  h1 { font-size:1.2em; margin-bottom:20px; }
-  .msg { color:#7fd; margin-bottom:16px; }
-  form { margin-bottom:14px; }
-  button {
-    width:90%; max-width:320px; padding:14px; font-size:1.1em;
-    margin:6px 0; border:none; border-radius:8px; cursor:pointer;
-  }
-  .quick     { background:#2d7; color:#000; }
-  .shutdown  { background:#d44; color:#fff; }
-  .restart   { background:#48a; color:#fff; }
-  .Suspend    { background:#888; color:#fff; }
-  .sleep     { background:#a6a; color:#fff; }
-  .abort     { background:#444; color:#fff; border:1px solid #777; }
-  select, input[type=number] { padding:8px; font-size:1em; margin:4px; border-radius:6px; border:none; }
-  .row { margin-bottom:10px; }
+$skinStyles
 </style>
 </head>
 <body>
 <h1>$($config.TrayText)</h1>
 $msgHtml
 
+<h2>$quickHeading</h2>
+<p class="current-setting">$quickCurrentSetting</p>
 <form method="GET" action="/quick$tokenQuery">
-  <button class="quick" type="submit">$quickLabel</button>
+  <button class="$currentModeCss" type="submit">$quickLabel</button>
 </form>
 
+<h2>$chooseHeading</h2>
 <div class="row">
   <form method="GET" action="/exec" style="display:inline;">
     <input type="hidden" name="token" value="$token">
-    <select name="mode">
+    <select name="mode" id="modeSelect">
       <option value="-s">$modeOption_Shutdown</option>
       <option value="-r">$modeOption_Restart</option>
       <option value="-d">$modeOption_Suspend</option>
       <option value="-h">$modeOption_Hibernate</option>
+      <option value="-o">$modeOption_Logoff</option>
+      <option value="-l">$modeOption_Lock</option>
+      <option value="-x">$modeOption_MonitorOff</option>
     </select>
-    <select name="delay">
+    <select name="delay" id="delaySelect">
       <option value="15">$delayOption_15</option>
       <option value="30">$delayOption_30</option>
       <option value="60">$delayOption_60</option>
@@ -355,7 +521,7 @@ $msgHtml
     </select>
     <input type="number" name="customDelay" placeholder="$delayPlaceholder" min="0" style="width:70px; display:none;" id="customDelay">
     <br>
-    <button class="shutdown" type="submit">$execLabel</button>
+    <button class="shutdown" type="submit" id="execButton">$execLabel</button>
   </form>
 </div>
 
@@ -364,23 +530,52 @@ $msgHtml
 </form>
 
 <script>
-var delaySelect = document.querySelector('select[name=delay]');
+var delaySelect = document.getElementById('delaySelect');
 var customInput = document.getElementById('customDelay');
+var modeSelect = document.getElementById('modeSelect');
+var execButton = document.getElementById('execButton');
+
+// モード選択に応じて実行ボタンの配色を動的に切り替える
+var modeCssMap = {
+  '-s': 'shutdown', '-r': 'restart', '-d': 'suspend',
+  '-h': 'hibernate', '-o': 'logoff', '-l': 'lock', '-x': 'monitoroff'
+};
+function updateExecButtonClass() {
+  execButton.className = modeCssMap[modeSelect.value] || 'shutdown';
+  
+  // 即時実行系 (-l, -x, -o) かどうかの判定
+  var isImmediate = (modeSelect.value === '-l' || modeSelect.value === '-x' || modeSelect.value === '-o');
+  if (isImmediate) {
+    delaySelect.style.display = 'none';
+    customInput.style.display = 'none';
+  } else {
+    delaySelect.style.display = 'inline-block';
+    customInput.style.display = (delaySelect.value === 'custom') ? 'inline-block' : 'none';
+  }
+}
+modeSelect.addEventListener('change', updateExecButtonClass);
+updateExecButtonClass();
 
 delaySelect.addEventListener('change', function(){
   customInput.style.display = (this.value === 'custom') ? 'inline-block' : 'none';
 });
 
 document.querySelector('form[action="/exec"]').addEventListener('submit', function(e){
-  if (delaySelect.value === 'custom') {
+  var isImmediate = (modeSelect.value === '-l' || modeSelect.value === '-x' || modeSelect.value === '-o');
+  if (isImmediate) {
+    var hidden = document.createElement('input');
+    hidden.type  = 'hidden';
+    hidden.name  = 'delay';
+    hidden.value = '0';
+    delaySelect.disabled = true;
+    this.appendChild(hidden);
+  } else if (delaySelect.value === 'custom') {
     var val = parseInt(customInput.value, 10);
     if (isNaN(val) || val < 1) { val = 15; }
-    // hiddenフィールドに値をセットしてからselectをdisabledにする
     var hidden = document.createElement('input');
     hidden.type  = 'hidden';
     hidden.name  = 'delay';
     hidden.value = val;
-    // 既存のselectをdisableして送信から除外
     delaySelect.disabled = true;
     this.appendChild(hidden);
   }
@@ -391,16 +586,12 @@ document.querySelector('form[action="/exec"]').addEventListener('submit', functi
 "@
 }
 
-# --- HTTPリスナーを起動 ---
-# Start HTTP listener
 $prefix = $config.Host -f $config.Port
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add($prefix)
 $listener.Start()
 Write-Log (T 'Log_ServerStarted' $prefix)
 
-# --- タスクトレイアイコンを設定 ---
-# Set up task tray icon
 $trayIcon = Load-TrayIcon $config
 
 $icon = New-Object System.Windows.Forms.NotifyIcon
@@ -408,8 +599,6 @@ $icon.Icon    = $trayIcon
 $icon.Visible = $true
 $icon.Text    = T 'TrayText'
 
-# --- コンテキストメニューを構築 ---
-# Build context menu
 $menu = New-Object System.Windows.Forms.ContextMenu
 
 $menuMode = New-Object System.Windows.Forms.MenuItem((T 'MenuMode'))
@@ -419,16 +608,20 @@ $modeItems = @()
     @{ Label = T 'Mode_Restart';  Value = "-r" }
     @{ Label = T 'Mode_Suspend';   Value = "-d" }
     @{ Label = T 'Mode_Hibernate'; Value = "-h" }
+    @{ Label = T 'Mode_Logoff';   Value = "-o" }
+    @{ Label = T 'Mode_Lock';     Value = "-l" }
+    @{ Label = T 'Mode_MonitorOff'; Value = "-x" }
 ) | ForEach-Object {
     $item = New-Object System.Windows.Forms.MenuItem($_.Label)
     $item.Tag     = $_.Value
-    $item.Checked = ($_.Value -eq $script:mode)
+    # A2: 初期化時点の参照先を $global:currentMode に統一（$script:mode は未初期化のため常に$null）
+    $item.Checked = ($_.Value -eq $global:currentMode)
     $itemValue    = $_.Value
     $item.Add_Click({
         $global:currentMode = $itemValue
-        Write-Log "DEBUG click mode=$global:currentMode"
+        Write-DebugLog "click mode=$global:currentMode"
         Update-MenuCheck $modeItems $global:currentMode
-        Write-Log (T 'Log_ModeChanged' $global:currentMode)
+        Write-Log (T 'Log_ModeChanged' (Get-ModeLabel $global:currentMode))
     }.GetNewClosure())
     $modeItems += $item
     $menuMode.MenuItems.Add($item) | Out-Null
@@ -444,12 +637,14 @@ $delayItems = @()
 ) | ForEach-Object {
     $item = New-Object System.Windows.Forms.MenuItem($_.Label)
     $item.Tag     = $_.Value
-    $item.Checked = ($_.Value -eq $script:delay)
+    # A2: 初期化時点の参照先を $global:currentDelay に統一
+    $item.Checked = ($_.Value -eq $global:currentDelay)
     $itemValue    = $_.Value
     $item.Add_Click({
-        $script:delay = $itemValue
-        Update-MenuCheck $delayItems $script:delay
-        Write-Log (T 'Log_DelayChanged' $script:delay)
+        # A1: $script:delay ではなく $global:currentDelay を更新する（遅延反映バグの修正）
+        $global:currentDelay = $itemValue
+        Update-MenuCheck $delayItems $global:currentDelay
+        Write-Log (T 'Log_DelayChanged' $global:currentDelay)
     }.GetNewClosure())
     $delayItems += $item
     $menuDelay.MenuItems.Add($item) | Out-Null
@@ -476,21 +671,67 @@ $menu.MenuItems.Add($menuExitLabel, {
     $icon.Visible = $false
     $trayIcon.Dispose()
     [ConsoleWindow]::ShowWindow($consoleHwnd, 0) | Out-Null
+    if ($script:appMutex) {
+        try {
+            $script:appMutex.ReleaseMutex()
+            $script:appMutex.Dispose()
+        } catch { }
+    }
     [System.Windows.Forms.Application]::Exit()
 }) | Out-Null
 
 $icon.ContextMenu = $menu
 
-# --- タイマーポーリング処理を開始 ---
-# Start timer polling
+# ContextMenu（レガシーAPI）は、生成直後にCheckedを設定しても
+# 実際に表示するまで見た目が更新されないことがあるため、
+# メニューを開く直前（Popupイベント）に必ず再同期する。
+# The legacy ContextMenu control does not always repaint Checked state
+# immediately after being set programmatically. Force a re-sync right
+# before the menu is shown (Popup event) to guarantee the checkmark
+# reflects the current mode/delay every time the tray menu opens.
+$menu.Add_Popup({
+    Update-MenuCheck $modeItems $global:currentMode
+    Update-MenuCheck $delayItems $global:currentDelay
+})
+
 $script:cancelHandler = $null
 $script:contextTask = $listener.GetContextAsync()
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 200
 
+$stateChangingPaths = @("/quick", "/exec", "/abort")
+
+# C1: Refererヘッダーによる簡易CSRF緩和チェック。
+#     ・Refererが無い（ブックマーク・URL直打ち等） → 許可（熟練者向けの利便性を維持）
+#     ・Refererが自オリジンと一致 → 許可（Web UIからの正規操作）
+#     ・Refererが他オリジン → 拒否（第三者ページへの埋め込み等によるCSRFの可能性）
+#     ※ Refererは仕様上省略され得るため完全な対策ではなく、多層防御の一部として扱う。
+# C1: Lightweight CSRF mitigation via Referer header.
+#     - No Referer (bookmark / direct URL entry) -> allow (preserves power-user convenience)
+#     - Referer matches own origin -> allow (normal Web UI operation)
+#     - Referer is a different origin -> deny (possible CSRF via third-party embedding)
+#     Note: Referer can be legitimately absent, so this is defense-in-depth, not a complete fix.
+function Test-RefererAllowed {
+    param($req)
+    $referer = $req.Headers["Referer"]
+    if ([string]::IsNullOrEmpty($referer)) { return $true }
+    try {
+        $refererUri = [Uri]$referer
+        $ownScheme = $req.Url.Scheme
+        $ownHost   = $req.Url.Host
+        $ownPort   = $req.Url.Port
+        return ($refererUri.Scheme -eq $ownScheme) -and
+               ($refererUri.Host -eq $ownHost) -and
+               ($refererUri.Port -eq $ownPort)
+    } catch {
+        # Refererの形式が不正な場合は安全側に倒して拒否
+        return $false
+    }
+}
+
 $timer.Add_Tick({
-    
+
     if (-not $listener.IsListening) { $timer.Stop(); return }
 
     if ($script:contextTask.IsCompleted) {
@@ -503,6 +744,20 @@ $timer.Add_Tick({
             $authorized = ($config.Token -eq "") -or
                           ($req.QueryString["token"] -eq $config.Token)
 
+            # C1: 状態変更系エンドポイントのみReferer検証の対象とする
+            if ($authorized -and ($path -in $stateChangingPaths)) {
+                if (-not (Test-RefererAllowed $req)) {
+                    $authorized = $false
+                    $res.StatusCode = 403
+                    $body = [System.Text.Encoding]::UTF8.GetBytes("Forbidden (referer check failed).")
+                    $res.OutputStream.Write($body, 0, $body.Length)
+                    $res.Close()
+                    Write-Log "中止: 外部オリジンからのリクエストを拒否 [$($req.RemoteEndPoint)] Referer=$($req.Headers['Referer'])"
+                    $script:contextTask = $listener.GetContextAsync()
+                    return
+                }
+            }
+
             if (-not $authorized) {
                 $res.StatusCode = 403
                 $body = [System.Text.Encoding]::UTF8.GetBytes("Forbidden.")
@@ -513,7 +768,10 @@ $timer.Add_Tick({
             else {
                 switch ($path) {
                     "/" {
-                        $html = Get-HtmlPage $config.Token "" $global:currentMode $global:currentDelay
+                        # A3: /abort からのリダイレクトに付与された msg クエリを取得しデコードして渡す
+                        $msgParam = $req.QueryString["msg"]
+                        $msgText = if ($msgParam) { [System.Web.HttpUtility]::UrlDecode($msgParam, [System.Text.Encoding]::UTF8) } else { "" }
+                        $html = Get-HtmlPage $config.Token $msgText $global:currentMode $global:currentDelay
                         $body = [System.Text.Encoding]::UTF8.GetBytes($html)
                         $res.ContentType = "text/html; charset=utf-8"
                         $res.Headers.Add("Cache-Control", "no-store")
@@ -522,6 +780,7 @@ $timer.Add_Tick({
                     }
                     "/quick" {
                         Invoke-ShutdownAction $global:currentMode $global:currentDelay $req.RemoteEndPoint
+                        $res.Headers.Add("Cache-Control", "no-store")
                         $redirectUrl = if ($config.Token -ne "") { "/?token=$($config.Token)" } else { "/" }
                         $res.Redirect($redirectUrl)
                         $res.Close()
@@ -529,9 +788,11 @@ $timer.Add_Tick({
                     "/exec" {
                         $m = $req.QueryString["mode"]
                         $d = $req.QueryString["delay"]
-                        if ($m -notin @("-s","-r","-d","-h")) { $m = "-s" }
-                        if (-not ($d -match '^\d+$')) { $d = "15" }
+                        # B1/B2: ログオフ(-o)・ロック(-l)を許可リストに追加
+                        if ($m -notin @("-s","-r","-d","-h","-o","-l")) { $m = "-s" }
+                        if (-not ($d -match '^d+$')) { $d = "15" }
                         Invoke-ShutdownAction $m $d $req.RemoteEndPoint
+                        $res.Headers.Add("Cache-Control", "no-store")
                         $redirectUrl = if ($config.Token -ne "") { "/?token=$($config.Token)" } else { "/" }
                         $res.Redirect($redirectUrl)
                         $res.Close()
@@ -549,7 +810,8 @@ $timer.Add_Tick({
                             $icon.ShowBalloonTip(3000)
                         } catch { }
                         $msgToEncode = T 'AbortDoneMsg'
-                        $msgEncoded = [System.Web.HttpUtility]::UrlEncode($msgToEncode)
+                        $msgEncoded = [System.Web.HttpUtility]::UrlEncode($msgToEncode, [System.Text.Encoding]::UTF8)
+                        $res.Headers.Add("Cache-Control", "no-store")
                         $redirectUrl = if ($config.Token -ne "") { "/?token=$($config.Token)&msg=$msgEncoded" } else { "/?msg=$msgEncoded" }
                         $res.Redirect($redirectUrl)
                         $res.Close()
@@ -571,15 +833,19 @@ $timer.Add_Tick({
 })
 $timer.Start()
 
-# --- UIメッセージループを実行 ---
-# Run UI message loop
 [System.Windows.Forms.Application]::Run()
 
-# --- クリーンアップ処理を実行 ---
-# Perform cleanup
 $timer.Stop()
 $timer.Dispose()
 if ($listener.IsListening) { $listener.Stop() }
 $icon.Visible = $false
 $trayIcon.Dispose()
 Write-Log (T 'Log_Cleanup')
+
+# B4: Mutexを解放する
+if ($script:appMutex) {
+    try {
+        $script:appMutex.ReleaseMutex()
+        $script:appMutex.Dispose()
+    } catch { }
+}

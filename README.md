@@ -1,98 +1,136 @@
-# AllowRemoteShutdown
-[English version is here](./Readme.en.md)
-## 概要
+# AllowRemoteShutdown (リモートシャットダウン管理サーバー)
 
-**AllowRemoteShutdown**  は、PowerShell標準の HttpListener と Microsoft Sysinternals 製の psshutdown.exe を組み合わせた、軽量かつ透明性の高いリモート電源管理サーバーです。本プロジェクトの最大のコンセプトは「透明性」です。外部のブラックボックスな実行ファイルに依存せず、すべてのロジックを検証可能なPowerShellスクリプトで記述しています。中・上級ユーザーがコードの内容を精査し、自身の環境に合わせて自由にカスタマイズして導入できるよう設計されています。
+**AllowRemoteShutdown** は、PowerShell 5.1標準の HTTP サーバー（`HttpListener`）と Microsoft Sysinternals 製の `psshutdown.exe`（または Windows 標準の `shutdown.exe`）を組み合わせた、軽量かつ抜群の透明性を誇るリモート電源管理サーバーおよびそのモダンな Web UI です。
 
-### 主な特徴
+すべてのバックエンドロジックが改ざんや安全性の検証（監査）が容易なオープンコード（PowerShell スクリプト）で記述されており、中・上級ユーザーがセキュアかつクローズドなネットワーク内で安心して利用できるように設計されています。
 
-* **多言語対応** : 日本語（JP）と英語（EN）をサポート。OSの言語設定に応じた自動切り替え（auto）に加え、手動での固定も可能です。  
-* **多彩な電源モード** : 単なるシャットダウンだけでなく、再起動（Restart）、ログオフ（Log off）、休止状態（Hibernate）に対応しています。  
-* **タスクトレイ常駐** : Unicodeシンボル「⏼」（U+23FC）を用いた電源アイコンがタスクトレイに表示され、動作状況を一目で確認できます。  
-* **クイック・フィードバックとキャンセル機能** :  
-* アクション実行時にバルーン通知（通知センター）を表示。  
-* **実行キャンセル** : 通知をクリックすることで、即座に中止コマンド（psshutdown \-a）を実行し、アクションを撤回できます。  
-* **高度な安全性** :  
-* アクセストークン（Token）による簡易認証。  
-* 多重起動を防止するミューテックス（Mutex）管理。  
-* Windows標準の URL ACL による非特権ユーザーの権限管理。  
-* **カスタマイズ性** : ポート、トークン、待機時間、ログ保存先などをスクリプト内の設定セクションから容易に変更可能です。
+---
 
-### 動作要件
+## 🚀 主な特徴 (Key Features)
 
-* **OS** : Windows 10 / 11  
-* **実行環境** : PowerShell 5.1（Windows標準。PowerShell Core 7系では動作が異なる場合があります）  
-* **外部ツール** : psshutdown.exe（Microsoftの高機能なシャットダウンユーティリティーです。PsToolsを解凍し任意の場所に配置してください）
-https://learn.microsoft.com/ja-jp/sysinternals/downloads/psshutdown
-* 本スクリプトの冒頭に設定欄がありますのでpsshutdown.exeのパスなどを記載してください。
+1. **多言語・ローカライズ対応 (Bilingual UI)**
+   * 日本語（JP）および英語（EN）を完全サポート。OSのシステムロケールを判別して自動で切り替えるほか、設定による言語固定も可能です。
+2. **多彩な電源操作モード**
+   * シャットダウン（Shutdown）、再起動（Restart）、ログオフ（Log off）、スリープ/サスペンド（Suspend）、休止状態（Hibernate）、モニターオフ（Monitor Off）、画面ロック（Lock）など、豊富な操作がトレイメニューおよび Web UI から実行可能。
+3. **安全・快適なタスクトレイ常駐**
+   * Unicode 記号「⏼」を使用した視認性の高いトレイアイコン（または任意に変更可能）から、状態の監視、ログ表示、各種設定の変更をリアルタイムに操作できます。
+4. **不整合対策・誤操作防止機能 (Web Sync Protection)**
+   * PC（トレイ）側で設定されている「クイックオフ設定」が変更された場合、Webブラウザ側からの意図しない実行を防ぐため、安全のために不整合を検知して遮断します。上の再読み込み（⟳）ボタンを押して同期を促す安全設計です。
+5. **文字化け対策済みのバルーン通知 ＆ クイック中止**
+   * Web からシャットダウンが要求されると、PC 画面上にバルーン通知が表示されます。通知をクリックする、または Web UI から「中止」をタップすることで即座に `psshutdown -a` が走り、カウントダウンを撤回できます。日本語の文字化け問題も UTF-8 URLエンコード/デコード処理により完全対策済みです。
+6. **3つの美しい標準スキン ＆ 完全なカスタムスキン対応**
+   * **Slate** (モダンで目に優しいダークテーマ)
+   * **Terminal** (ハッカー/コマンドライン風レトロテーマ)
+   * **Minimal** (極太ボーダーとフラットなブルータリストデザイン)
+   * 自作の HTML/CSS を適用できる「カスタムスキン」機能も搭載（詳細は [SKIN_CUSTOMIZATION_GUIDE.md](./SKIN_CUSTOMIZATION_GUIDE.md) を参照）。
+7. **対話式の初期設定スクリプト (`setup.ps1`)**
+   * ポート番号、セキュリティトークンの生成、使用する実行コマンド（Windows標準 or PsShutdown）のパス設定、および「EULA（ライセンス同意）のレジストリ自動登録」を対話形式で一発構築できる初期設定スクリプトを同梱。
+8. **学習用最小モデル (`LEARNING_MINIMAL_SERVER.ps1`)**
+   * バックグラウンドスレッド、HttpListener、トレイアイコン（NotifyIcon）の連携動作原理のみを凝縮した、学習者向け・改変用のクリーンなスケルトンコードを同梱。
 
-## セットアップ手順
+---
 
-管理者権限のPowerShellを開き、以下の手順を実行して通信環境を整えてください。
+## 📦 ファイル構成 (Files Included)
 
-### 手順1：URL ACLの登録
+*   `AllowRemoteShutdown.ps1` - 本体スクリプト。バックグラウンドサーバー、タスクトレイ、ロギングなどを制御。
+*   `setup.ps1` - ポートやパス、トークン等を対話形式でヒアリングし `config.json` を一括自動生成・環境整備するスクリプト。
+*   `config.json` - 設定ファイル（`setup.ps1` または本体設定画面から生成・変更）。
+*   `LEARNING_MINIMAL_SERVER.ps1` - 仕組みを学ぶための、解説コメント付き最小構成 PowerShell サーバーコード。
+*   `SKIN_CUSTOMIZATION_GUIDE.md` - 独自デザインの HTML/CSS で操作画面をフルカスタムしたい方向けの開発ガイド。
 
-非特権ユーザーによるHTTP待機を許可するため、以下のコマンドを実行します。  
-```Powershell
-netsh http add urlacl url=http://+:8080/ user=Everyone
+---
+
+## 🛠️ セットアップ・導入手順 (Setup Guide)
+
+### 手順 1: 対話式設定スクリプトの実行
+管理者権限で PowerShell を起動し、本フォルダに移動後、以下のスクリプトを実行します。
+
+```powershell
+Set-ExecutionPolicy RemoteSigned -Scope Process
+.\setup.ps1
 ```
-### 手順2：ファイアウォールの解放
+画面の指示に従って、ポート番号（既定: 3000）、アクセス制限用のトークン、PsShutdown のパス等を入力すると、自動的に `config.json` が生成されます。また、PsShutdown の初回起動時における規約同意（EULA）ダイアログを自動でスキップするレジストリの書き込みも同時に実施できます。
 
-外部端末からのアクセスを許可するための受信規則（TCP 8080ポート）を追加します。
-```Powershell
-New-NetFirewallRule \-DisplayName "Allow Remote Shutdown" \-Direction Inbound \-LocalPort 8080 \-Protocol TCP \-Action Allow
-```
-### 手順3：バックグラウンド起動ショートカットの作成
+*※PsShutdown の利用規約・ライセンスに配慮し、本スクリプト内での実行ファイルの自動配布・ダウンロードは行いません。必要に応じて Microsoft Sysinternals 公式サイトより手動でダウンロードして指定してください。*
 
-ウィンドウを表示せずに起動するためのショートカットを作成します。ショートカットの「リンク先」に以下の形式で記述してください。  
-```
-powershell.exe \-WindowStyle Hidden \-ExecutionPolicy Bypass \-File "C:\（PSShutdownのパス）\AllowRemoteShutdown.ps1"
+### 手順 2: URL ACL の登録 (非管理者実行のため)
+一般ユーザーや非特権プロセスでも指定ポート（例: 3000）で HTTP リスナーを待ち受けできるようにするため、管理者権限のターミナルで一度だけ以下を実行します。
+
+```powershell
+netsh http add urlacl url=http://+:3000/ user=Everyone
 ```
 
-※ ExecutionPolicy Bypass を付与することで、環境の実行ポリシー設定に関わらず動作させることができます。
+### 手順 3: Windows ファイアウォールの解放
+同じ Wi-Fi やローカルネットワーク内のスマートフォンや外部端末からアクセスできるように、受信ポートを許可します。
 
-## 使用方法
+```powershell
+New-NetFirewallRule -DisplayName "AllowRemoteShutdown" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 3000 -Profile Private
+```
+*(セキュリティ上、接続可能な送信元 IP 範囲をルーターのLAN内などに制限することを強く推奨します)*
 
-* **サーバーの起動** : ショートカットを管理者権限で実行するとタスクトレイに「⏼」アイコンが表示されます。  
-* **トレイメニュー操作** : アイコンを右クリックすることで、クイック実行時の「モード（シャットダウン/再起動等）」や「遅延時間（15/30/60秒）」を変更したり、ログの表示を切り替えたりできます。  
-* **クライアントからのアクセス** : スマホ等のブラウザから以下のURLにアクセスします。  
-* http://PCのIPアドレス:8080/  
-* **トークン設定時** : 初回アクセスには ?token=xxx の付与が必要です。一度認証されると、以降は画面内のボタン操作で完結します。  
-* **実行のキャンセル** : 実行後にPC側に表示されるバルーン通知をクリックすると、設定された AbortCmd が走り、シャットダウンが中止されます。
+### 手順 4: 常駐起動ショートカットの作成
+コンソール画面を表示させず、Windows 起動時にバックグラウンドで自動実行させたい場合は、以下の起動オプションを指定したショートカットを作成して `shell:startup` フォルダに配置します。
 
-### カスタマイズ (Configuration)
+*   **リンク先**:
+    ```cmd
+    powershell.exe -ExecutionPolicy Bypass -NoProfile -WindowStyle Hidden -File "C:\Path\To\AllowRemoteShutdown.ps1"
+    ```
+*   **詳細設定**: 「管理者として実行」にチェックを入れます。
 
-スクリプト冒頭の $config セクションで動作を定義します。
-| 設定項目 | 説明 | 既定値 / 例 |
+---
+
+## 📱 使用方法 (How to Use)
+
+1.  **サーバーを起動する**
+    *   作成したショートカットから起動します。タスクトレイに「⏼」アイコンが出現します。
+2.  **Webクライアントから操作する**
+    *   スマートフォン等のブラウザから、`http://[PCのIPアドレス]:[設定ポート]/` にアクセスします。
+    *   トークンが設定されている場合は、初回のみ `http://[PCのIPアドレス]:[設定ポート]/?token=[設定したトークン]` のようにトークン付きのURLでアクセスすることで、ブラウザにクッキー保存され、次回以降はURL入力のみでアクセス可能になります。
+3.  **シャットダウンの中止 (Abort)**
+    *   シャットダウンまたは再起動処理が開始されカウントダウンが始まった際、PC側にトレイからのバルーン通知が出現します。この通知をクリックするか、Webクライアント画面上の「中止 (Abort)」ボタンをタップすることで、即座にカウントダウンがキャンセルされます。
+
+---
+
+## ⚙️ 各種パラメータの設定 (Configuration)
+
+`config.json` を手動、または Web UI、あるいは `setup.ps1` から変更してカスタマイズできます。
+
+| パラメータ | 説明 | 既定値 / 設定例 |
 | :--- | :--- | :--- |
-| **Port** | 待ち受けポート番号。 | `8080` |
-| **Token** | アクセス認証用トークン。空文字以外を設定すると、URL末尾に `?token=xxx` が必要になります。 | `""` |
-| **Language** | UI表示言語。`"auto"`（OS依存）, `"ja"`, `"en"` から選択可能です。 | `"auto"` |
-| **ShutdownCmd** | `psshutdown.exe` 実行ファイルのフルパスを指定します。 | `C:\（PSShutdownのパス）\psshutdown.exe` |
-| **AbortCmd** | シャットダウン中止時に使用する実行ファイルのパスです。 | `$psShutdownPath` |
-| **AbortArgs** | 中止実行時のコマンドライン引数です。 | `"-a"` |
-| **LogFile** | 実行ログの保存先パスです。 | `.\AllowRemoteShutdown.log` |
-| **IconIndex** | `shell32.dll` 内から使用するアイコンのインデックス番号です。 | `27` |
-| **UseCustomIcon** | 独自の `.ico` ファイルを使用するかどうかのフラグです。 | `$false` |
-| **IconPath** | `UseCustomIcon` が `$true` の場合に使用するアイコンファイルのパスです。 | `""` |
+| `port` | Web UI待ち受け用のポート番号。 | `3000` |
+| `token` | 不正アクセス防止用トークン（空文字で認証無効化）。 | `"生成されたランダムトークン"` |
+| `psshutdownPath` | `psshutdown.exe` の絶対パス。空にすると Windows 標準の `shutdown.exe` を使用する簡易モードで動作。 | `"C:\PSTools\psshutdown.exe"` |
+| `mode` | クイックオフ実行で使用するデフォルトコマンド。 | `"-s"` (シャットダウン) / `"-r"` (再起動) 等 |
+| `delay` | クイックオフ実行時のデフォルト待機秒数。 | `15` |
+| `skin` | Web UIのテーマスタイル。 | `"slate"` / `"terminal"` / `"minimal"` |
 
-### トラブルシューティング
+---
 
-* **日本語の文字化け** : PowerShell 5.1は、BOMのないUTF-8ファイルを正しく解読できません。スクリプトを編集して保存する際は、必ず  **「BOM付き UTF-8」**  エンコーディングを選択してください。  
-* **接続拒否 (Connection Refused)** :  
- Windowsのネットワークプロファイルが  **「プライベート」**  になっているか確認してください。「パブリック」ではOSレベルで外部アクセスが遮断されます。  
- netsh http show urlacl を実行し、対象のポートが正しく予約されているか確認してください。  
-* **二重起動・ゾンビプロセスの発生** :  
- 既に同じポートが使用されている場合、起動に失敗します。タスクマネージャーで powershell.exe のプロセスを確認し、古いプロセスが残っている場合は終了させてください。  
-* **監査** : 動作の詳細は AllowRemoteShutdown.log に記録されます。通信の成否や認証エラーの履歴はこちらを確認してください。
+## ⚠️ トラブルシューティング (Troubleshooting)
 
-## ライセンス・免責事項
-### ライセンス / License
-本プロジェクトは **MITライセンス** の下で公開されています。商用・個人用問わず自由にご利用いただけますが、本ソフトウェアの使用に関連して生じた損害について、作者は一切の責任を負いません。
-### 免責事項 / Disclaimer
-- 本ツールの利用は自己責任で行ってください。
-- `psshutdown.exe` の著作権およびライセンスは Microsoft Corporation (Sysinternals) に帰属します。ツール自体のライセンス条項に従って利用してください。
+*   **ブラウザ操作時、設定が変わっているとエラーが出る**
+    *   「PCトレイ側のクイックオフ設定が変更されています...」と表示される場合、誤操作防止機能が作動しています。Web UI 上部の **⟳ (再読み込み)** をクリックし、最新の設定値をフェッチ・同期した状態で再度実行してください。
+*   **通知の文字が化ける・スクリプトがエラーになる**
+    *   PowerShell 5.1 は、BOM (Byte Order Mark) のない UTF-8 ファイルを正常に解釈できません。テキストエディタでスクリプトを手動編集した場合は、必ず **「UTF-8 (BOM付き)」** エンコードを選択して上書き保存してください。
+*   **接続できない (Connection Refused)**
+    *   接続するスマートフォンと PC が同じ Wi-Fi ネットワーク（LAN）に属しているか、また Windows のネットワークプロファイルが **「プライベート」** に設定されているか確認してください（パブリックプロファイルではOSのセキュリティ上、通信が遮断されます）。
 
-### 作者 / Author
-- 作成者: [norandot]
-- プロジェクトURL: [https://github.com/norandot/AllowRemoteShutdown/]
+---
+
+## 📜 ライセンス ＆ 免責事項 (License & Disclaimer)
+
+*   **ライセンス**: 本プロジェクトは **MIT ライセンス** の下で公開されています。商用・個人用を問わず自由に変更・配布可能ですが、使用によって生じた一切の損害やデータ紛失について作者は責任を負いません。
+*   `psshutdown.exe` の著作権およびライセンスは、Microsoft Corporation (Sysinternals) に帰属します。
+
+---
+
+## English Quick Summary
+
+**AllowRemoteShutdown** is a transparent, auditable remote shutdown management tool powered by PowerShell 5.1 and Microsoft Sysinternals `psshutdown.exe` (or native `shutdown.exe`).
+
+### Key Highlights:
+*   **Robust Web Syncing**: Safety feature checks if the client-side configuration matches the current desktop tray state, preventing unintended operations. If divergent, it prompts you to click **⟳ (Reload)** to synchronize first.
+*   **Interactive Setup (`setup.ps1`)**: Prompts for Port, Token, and Command type (native vs psshutdown), handles registry EULA automatic entry, and sets up your `config.json` effortlessly.
+*   **3 Visual Themes + Custom Skin Support**: Toggle beautifully styled visual skins (**Slate**, **Terminal**, or **Minimal**), or code your own theme inside [SKIN_CUSTOMIZATION_GUIDE.md](./SKIN_CUSTOMIZATION_GUIDE.md).
+*   **No Mojibake**: Complete UTF-8 URL-encoding ensures clear Japanese/English cancellation notifications with instant Click-to-Abort.
+*   **Clean Learning Blueprint**: Includes `LEARNING_MINIMAL_SERVER.ps1` highlighting HttpListener & NotifyIcon thread coordination for educational purposes.
