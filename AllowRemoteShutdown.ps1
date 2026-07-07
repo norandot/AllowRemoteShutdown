@@ -1,4 +1,4 @@
-﻿[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Web
@@ -152,6 +152,10 @@ $strings = @{
         Log_DelayChanged = "クイックオフの遅延変更: {0} 秒"
         Log_Cleanup = "サーバーを停止しました"
         CustomDelayPlaceholder = "秒数"
+        QuickSettingsMismatch = "PCトレイ側のクイックオフ設定が変更されています。⟳ (再読み込み) をクリックして最新の設定と同期してください。"
+        SkinHeading = "スキン (テーマ) の切り替え"
+        Log_ExecutedMsg = "リクエストを送信しました: {0} を {1} 秒後に実行します。"
+        Log_ExecutedMsgImmediate = "リクエストを送信しました: {0} を即時実行します。"
     }
     en = @{
         TrayText = "AllowRemoteShutdown"
@@ -189,6 +193,10 @@ $strings = @{
         Log_DelayChanged = "Quick-off delay changed: {0} sec"
         Log_Cleanup = "Server stopped"
         CustomDelayPlaceholder = "seconds"
+        QuickSettingsMismatch = "The PC's quick execution parameters were changed. Click ⟳ (Reload) to synchronize first."
+        SkinHeading = "Switch Skin (Theme)"
+        Log_ExecutedMsg = "Request sent: {0} will execute in {1} seconds."
+        Log_ExecutedMsgImmediate = "Request sent: {0} will execute immediately."
     }
 }
 
@@ -387,6 +395,10 @@ function Get-HtmlPage {
     $delayOption_60 = [System.Web.HttpUtility]::HtmlEncode((T 'Delay_60'))
     $delayOption_Custom = [System.Web.HttpUtility]::HtmlEncode((T 'Delay_Custom'))
     $delayPlaceholder = [System.Web.HttpUtility]::HtmlEncode((T 'CustomDelayPlaceholder'))
+    $skinHeading = [System.Web.HttpUtility]::HtmlEncode((T 'SkinHeading'))
+    $skinSelected_slate = if ($config.Skin -eq "slate") { "selected" } else { "" }
+    $skinSelected_terminal = if ($config.Skin -eq "terminal") { "selected" } else { "" }
+    $skinSelected_minimal = if ($config.Skin -eq "minimal") { "selected" } else { "" }
 
     if ($config.CustomSkinPath -and (Test-Path $config.CustomSkinPath)) {
         try {
@@ -433,7 +445,7 @@ function Get-HtmlPage {
   body { font-family: ui-sans-serif, system-ui, sans-serif; background:#fafafa; color:#111; text-align:center; padding:24px; }
   h1 { font-size:1.5em; font-weight: 800; letter-spacing: -0.025em; margin-bottom:24px; text-transform: uppercase; border-bottom: 2px solid #111; display: inline-block; padding-bottom: 4px; }
   h2 { font-size:0.9em; color:#666; font-weight:700; text-transform: uppercase; letter-spacing: 0.05em; margin:24px 0 8px; text-align:left; max-width:320px; margin-left:auto; margin-right:auto; }
-  .msg { background:#fee2e2; color:#b91c1c; border:1px solid #f87171; padding:10px; font-size:0.9em; font-weight:600; margin-bottom:16px; max-width:320px; margin-left:auto; margin-right:auto; }
+  .msg { background:#fee2e2; color:#b91c1c; border:2px solid #f87171; padding:10px; font-size:0.9em; font-weight:600; margin-bottom:16px; max-width:320px; margin-left:auto; margin-right:auto; }
   .current-setting { color:#4b5563; font-size:0.85em; margin:0 0 8px; font-weight: 500; }
   form { margin-bottom:14px; }
   button {
@@ -441,9 +453,10 @@ function Get-HtmlPage {
     margin:6px 0; border:2px solid #111; background:#111; color:#fff; cursor:pointer; border-radius: 0px; text-transform: uppercase; transition: all 0.15s ease;
   }
   button:hover { background:#fff; color:#111; }
+  button:active { transform: scale(0.98); }
   .shutdown:hover { border-color: #ef4444; color: #ef4444; }
   .restart:hover { border-color: #3b82f6; color: #3b82f6; }
-  .suspend:hover { border-color: #6b7280; color: #6b7280; }
+  .suspend:hover { border-color: #0d9488; color: #0d9488; }
   .hibernate:hover { border-color: #a855f7; color: #a855f7; }
   .logoff:hover { border-color: #f59e0b; color: #f59e0b; }
   .lock:hover { border-color: #06b6d4; color: #06b6d4; }
@@ -459,17 +472,20 @@ function Get-HtmlPage {
   body { font-family: sans-serif; background:#1e1e1e; color:#eee; text-align:center; padding:20px; }
   h1 { font-size:1.2em; margin-bottom:20px; }
   h2 { font-size:0.95em; color:#aaa; font-weight:normal; margin:22px 0 6px; text-align:left; max-width:320px; margin-left:auto; margin-right:auto; }
-  .msg { color:#7fd; margin-bottom:16px; }
+  .msg { color:#7fd; margin-bottom:16px; font-weight: 600; background: rgba(119, 255, 221, 0.1); border: 1px solid rgba(119, 255, 221, 0.2); padding: 10px; border-radius: 8px; max-width: 320px; margin-left: auto; margin-right: auto; }
   .current-setting { color:#9c9; font-size:0.85em; margin:0 0 8px; }
   form { margin-bottom:14px; }
   button {
     width:90%; max-width:320px; padding:14px; font-size:1.1em;
     margin:6px 0; border:none; border-radius:8px; cursor:pointer;
+    transition: all 0.2s ease;
   }
+  button:hover { filter: brightness(1.15); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+  button:active { transform: scale(0.98); }
   .shutdown  { background:#d44; color:#fff; }
   .restart   { background:#48a; color:#fff; }
-  .suspend   { background:#888; color:#fff; }
-  .hibernate { background:#a6a; color:#fff; }
+  .suspend   { background:#0aa; color:#fff; }
+  .hibernate { background:#86a; color:#fff; }
   .logoff    { background:#c90; color:#fff; }
   .lock      { background:#29a; color:#fff; }
   .monitoroff { background:#a65; color:#fff; }
@@ -497,6 +513,8 @@ $msgHtml
 <h2>$quickHeading</h2>
 <p class="current-setting">$quickCurrentSetting</p>
 <form method="GET" action="/quick$tokenQuery">
+  <input type="hidden" name="expectedMode" value="$currentMode">
+  <input type="hidden" name="expectedDelay" value="$currentDelay">
   <button class="$currentModeCss" type="submit">$quickLabel</button>
 </form>
 
@@ -528,6 +546,18 @@ $msgHtml
 <form method="GET" action="/abort$tokenQuery">
   <button class="abort" type="submit">$abortLabel</button>
 </form>
+
+<h2>$skinHeading</h2>
+<div class="row">
+  <form method="GET" action="/set-skin">
+    <input type="hidden" name="token" value="$token">
+    <select name="skin" onchange="this.form.submit()">
+      <option value="slate" $skinSelected_slate>Slate</option>
+      <option value="terminal" $skinSelected_terminal>Terminal</option>
+      <option value="minimal" $skinSelected_minimal>Minimal</option>
+    </select>
+  </form>
+</div>
 
 <script>
 var delaySelect = document.getElementById('delaySelect');
@@ -580,6 +610,15 @@ document.querySelector('form[action="/exec"]').addEventListener('submit', functi
     this.appendChild(hidden);
   }
 });
+
+// URLから msg パラメータを消去してヒストリをクリーンアップする（リロード時にmsgが残る問題への対策）
+if (window.history && window.history.replaceState) {
+  var url = new URL(window.location.href);
+  if (url.searchParams.has('msg')) {
+    url.searchParams.delete('msg');
+    window.history.replaceState({}, document.title, url.pathname + url.search);
+  }
+}
 </script>
 </body>
 </html>
@@ -741,8 +780,10 @@ $timer.Add_Tick({
             $res     = $context.Response
             $path    = $req.Url.AbsolutePath
 
+            $query = [System.Web.HttpUtility]::ParseQueryString($req.Url.Query, [System.Text.Encoding]::UTF8)
+
             $authorized = ($config.Token -eq "") -or
-                          ($req.QueryString["token"] -eq $config.Token)
+                          ($query["token"] -eq $config.Token)
 
             # C1: 状態変更系エンドポイントのみReferer検証の対象とする
             if ($authorized -and ($path -in $stateChangingPaths)) {
@@ -769,8 +810,8 @@ $timer.Add_Tick({
                 switch ($path) {
                     "/" {
                         # A3: /abort からのリダイレクトに付与された msg クエリを取得しデコードして渡す
-                        $msgParam = $req.QueryString["msg"]
-                        $msgText = if ($msgParam) { [System.Web.HttpUtility]::UrlDecode($msgParam, [System.Text.Encoding]::UTF8) } else { "" }
+                        $msgParam = $query["msg"]
+                        $msgText = if ($msgParam) { $msgParam } else { "" }
                         $html = Get-HtmlPage $config.Token $msgText $global:currentMode $global:currentDelay
                         $body = [System.Text.Encoding]::UTF8.GetBytes($html)
                         $res.ContentType = "text/html; charset=utf-8"
@@ -779,19 +820,77 @@ $timer.Add_Tick({
                         $res.Close()
                     }
                     "/quick" {
-                        Invoke-ShutdownAction $global:currentMode $global:currentDelay $req.RemoteEndPoint
+                        $expectedMode = $query["expectedMode"]
+                        $expectedDelay = $query["expectedDelay"]
+
+                        $mismatch = $false
+                        if ($expectedMode -and ($expectedMode -ne $global:currentMode)) { $mismatch = $true }
+                        if ($expectedDelay -and ($expectedDelay -ne $global:currentDelay)) { $mismatch = $true }
+
+                        if ($mismatch) {
+                            $msgToEncode = T 'QuickSettingsMismatch'
+                            $msgEncoded = [System.Web.HttpUtility]::UrlEncode($msgToEncode, [System.Text.Encoding]::UTF8)
+                            $res.Headers.Add("Cache-Control", "no-store")
+                            $redirectUrl = if ($config.Token -ne "") { "/?token=$($config.Token)&msg=$msgEncoded" } else { "/?msg=$msgEncoded" }
+                            $res.Redirect($redirectUrl)
+                            $res.Close()
+                        } else {
+                            Invoke-ShutdownAction $global:currentMode $global:currentDelay $req.RemoteEndPoint
+                            
+                            $modeLabel = Get-ModeLabel $global:currentMode
+                            $msgToEncode = ""
+                            if ($global:currentMode -in @("-l","-x","-o")) {
+                                $msgToEncode = T 'Log_ExecutedMsgImmediate' $modeLabel
+                            } else {
+                                $msgToEncode = T 'Log_ExecutedMsg' $modeLabel $global:currentDelay
+                            }
+                            $msgEncoded = [System.Web.HttpUtility]::UrlEncode($msgToEncode, [System.Text.Encoding]::UTF8)
+
+                            $res.Headers.Add("Cache-Control", "no-store")
+                            $redirectUrl = if ($config.Token -ne "") { "/?token=$($config.Token)&msg=$msgEncoded" } else { "/?msg=$msgEncoded" }
+                            $res.Redirect($redirectUrl)
+                            $res.Close()
+                        }
+                    }
+                    "/exec" {
+                        $m = $query["mode"]
+                        $d = $query["delay"]
+                        # B1/B2/A4: モニターオフ(-x)も許可リストに追加
+                        if ($m -notin @("-s","-r","-d","-h","-o","-l","-x")) { $m = "-s" }
+                        if (-not ($d -match '^\d+$')) { $d = "15" }
+                        Invoke-ShutdownAction $m $d $req.RemoteEndPoint
+
+                        $modeLabel = Get-ModeLabel $m
+                        $msgToEncode = ""
+                        if ($m -in @("-l","-x","-o")) {
+                            $msgToEncode = T 'Log_ExecutedMsgImmediate' $modeLabel
+                        } else {
+                            $msgToEncode = T 'Log_ExecutedMsg' $modeLabel $d
+                        }
+                        $msgEncoded = [System.Web.HttpUtility]::UrlEncode($msgToEncode, [System.Text.Encoding]::UTF8)
+
                         $res.Headers.Add("Cache-Control", "no-store")
-                        $redirectUrl = if ($config.Token -ne "") { "/?token=$($config.Token)" } else { "/" }
+                        $redirectUrl = if ($config.Token -ne "") { "/?token=$($config.Token)&msg=$msgEncoded" } else { "/?msg=$msgEncoded" }
                         $res.Redirect($redirectUrl)
                         $res.Close()
                     }
-                    "/exec" {
-                        $m = $req.QueryString["mode"]
-                        $d = $req.QueryString["delay"]
-                        # B1/B2: ログオフ(-o)・ロック(-l)を許可リストに追加
-                        if ($m -notin @("-s","-r","-d","-h","-o","-l")) { $m = "-s" }
-                        if (-not ($d -match '^d+$')) { $d = "15" }
-                        Invoke-ShutdownAction $m $d $req.RemoteEndPoint
+                    "/set-skin" {
+                        $newSkin = $query["skin"]
+                        if ($newSkin -in @("slate", "terminal", "minimal")) {
+                            $config.Skin = $newSkin
+                            $configJsonPath = Join-Path $scriptDir "config.json"
+                            if (Test-Path $configJsonPath) {
+                                try {
+                                    $jsonContent = Get-Content -Path $configJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                                    $jsonContent.skin = $newSkin
+                                    $jsonContent | ConvertTo-Json | Out-File -FilePath $configJsonPath -Encoding UTF8 -Force
+                                    Write-Log "Skin persisted to config.json: $newSkin"
+                                } catch {
+                                    Write-Log "Failed to persist skin to config.json: $_"
+                                }
+                            }
+                            Write-Log "Skin changed to: $newSkin"
+                        }
                         $res.Headers.Add("Cache-Control", "no-store")
                         $redirectUrl = if ($config.Token -ne "") { "/?token=$($config.Token)" } else { "/" }
                         $res.Redirect($redirectUrl)
