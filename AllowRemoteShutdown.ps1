@@ -47,29 +47,6 @@ if (-not $isAdmin) {
 }
 
 # ============================================================
-# 多重起動防止（B4）
-# Prevent multiple instances (B4)
-# ------------------------------------------------------------
-# 日本語: 同一マシン上での多重起動を防ぐため、Global名前空間のMutexで排他制御する。
-#         Global\ を付与することで、別ユーザーセッションからの多重起動も防止する。
-# English: Uses a named Mutex in the Global namespace to prevent multiple
-#          instances on the same machine, including across different user
-#          sessions (Global\ prefix).
-$mutexName = "Global\AllowRemoteShutdown_Mutex_8080"
-$createdNew = $false
-$script:appMutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
-if (-not $createdNew) {
-    [System.Windows.Forms.MessageBox]::Show(
-        "AllowRemoteShutdown は既に起動しています。`r`n" +
-        "AllowRemoteShutdown is already running.",
-        "AllowRemoteShutdown",
-        [System.Windows.Forms.MessageBoxButtons]::OK,
-        [System.Windows.Forms.MessageBoxIcon]::Information
-    ) | Out-Null
-    Exit
-}
-
-# ============================================================
 # 設定（ここだけ編集する）
 # Configuration - edit this section only
 # ============================================================
@@ -100,7 +77,50 @@ $config = @{
 
 $global:currentMode  = "-s"
 $global:currentDelay = "15"
+
+# setup.ps1 等で作成された config.json が存在する場合は読み込む
+$configFilePath = Join-Path $scriptDir "config.json"
+if (Test-Path $configFilePath) {
+    try {
+        $json = Get-Content -Path $configFilePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($json.port) { $config.Port = [int]$json.port }
+        if ($json.token -ne $null) { $config.Token = [string]$json.token }
+        if ($json.psshutdownPath -ne $null -and $json.psshutdownPath -ne "") { 
+            $config.ShutdownCmd = [string]$json.psshutdownPath
+            $config.AbortCmd = [string]$json.psshutdownPath
+        }
+        if ($json.skin -ne $null -and $json.skin -ne "") { $config.Skin = [string]$json.skin }
+        if ($json.mode -ne $null -and $json.mode -ne "") { $global:currentMode = [string]$json.mode }
+        if ($json.delay -ne $null -and $json.delay -ne "") { $global:currentDelay = [string]$json.delay }
+        if ($json.iconIndex -ne $null) { $config.IconIndex = [int]$json.iconIndex }
+    } catch {
+        # エラー時はデフォルトを使用
+    }
+}
 # ============================================================
+
+# ============================================================
+# 多重起動防止（B4）
+# Prevent multiple instances (B4)
+# ------------------------------------------------------------
+# 日本語: 同一マシン上での多重起動を防ぐため、Global名前空間のMutexで排他制御する。
+#         Global\ を付与することで、別ユーザーセッションからの多重起動も防止する。
+# English: Uses a named Mutex in the Global namespace to prevent multiple
+#          instances on the same machine, including across different user
+#          sessions (Global\ prefix).
+$mutexName = "Global\AllowRemoteShutdown_Mutex_$($config.Port)"
+$createdNew = $false
+$script:appMutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
+if (-not $createdNew) {
+    [System.Windows.Forms.MessageBox]::Show(
+        "AllowRemoteShutdown は既に起動しています。`r`n" +
+        "AllowRemoteShutdown is already running.",
+        "AllowRemoteShutdown",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Information
+    ) | Out-Null
+    Exit
+}
 
 function Get-EffectiveLanguage {
     param()
