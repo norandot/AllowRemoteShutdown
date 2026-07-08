@@ -92,21 +92,27 @@ if ($cmdChoice -eq "1") {
     $eulaChoice = Read-Host "自動同意を有効化しますか？ (Y/N) [デフォルト: Y]"
     if ($eulaChoice -ne "N" -and $eulaChoice -ne "n") {
         Write-Host "レジストリに Sysinternals EULA 同意情報を書き込んでいます..." -ForegroundColor Cyan
-        try {
-            $regPaths = @("HKCU:\Software\Sysinternals\PsShutdown", "HKLM:\Software\Sysinternals\PsShutdown")
-            foreach ($path in $regPaths) {
+        $successAny = $false
+        $regPaths = @("HKCU:\Software\Sysinternals\PsShutdown", "HKLM:\Software\Sysinternals\PsShutdown")
+        foreach ($path in $regPaths) {
+            try {
                 $parent = Split-Path $path -Parent
-                if (-not (Test-Path $parent)) {
-                    New-Item -Path (Split-Path $parent -Parent) -Name (Split-Path $parent -Leaf) -Force | Out-Null
+                if (-not (Test-Path $parent -ErrorAction SilentlyContinue)) {
+                    New-Item -Path (Split-Path $parent -Parent) -Name (Split-Path $parent -Leaf) -Force -ErrorAction Stop | Out-Null
                 }
-                if (-not (Test-Path $path)) {
-                    New-Item -Path $parent -Name (Split-Path $path -Leaf) -Force | Out-Null
+                if (-not (Test-Path $path -ErrorAction SilentlyContinue)) {
+                    New-Item -Path $parent -Name (Split-Path $path -Leaf) -Force -ErrorAction Stop | Out-Null
                 }
-                New-ItemProperty -Path $path -Name "EulaAccepted" -Value 1 -PropertyType DWord -Force | Out-Null
+                New-ItemProperty -Path $path -Name "EulaAccepted" -Value 1 -PropertyType DWord -Force -ErrorAction Stop | Out-Null
+                $successAny = $true
+            } catch {
+                # 管理者権限不足による HKLM への書き込み失敗などは無視して次のパスを試す
             }
+        }
+        if ($successAny) {
             Write-Host " -> レジストリの事前同意設定を正常に書き込みました。" -ForegroundColor Green
-        } catch {
-            Write-Host " -> レジストリ書き込みに失敗しました（管理者権限が必要な場合があります）。後ほど手動で一度 PsShutdown を起動して同意してください。" -ForegroundColor Yellow
+        } else {
+            Write-Host " -> レジストリ書き込みに失敗しました。後ほど手動で一度 PsShutdown を起動して同意してください。" -ForegroundColor Yellow
         }
     }
 }
